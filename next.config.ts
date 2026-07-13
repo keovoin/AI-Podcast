@@ -6,7 +6,10 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '10mb',
     },
   },
-  output: 'standalone',
+  // Vercel handles output automatically; standalone only for Docker
+  ...(process.env.DOCKER_BUILD === '1' ? { output: 'standalone' } : {}),
+  // Increase serverless function timeout for audio processing
+  serverExternalPackages: ['fluent-ffmpeg'],
 };
 
 export default nextConfig;

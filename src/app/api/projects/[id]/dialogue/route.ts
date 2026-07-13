@@ -1,0 +1,428 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+import { getLLMAdapter } from '@/lib/providers/registry';
+import { decryptApiKey } from '@/lib/crypto';
+import { RoutingEngine } from '@/lib/routing/engine';
+import type { RoutableProvider } from '@/lib/routing/engine';
+import type { AdapterConfig } from '@/lib/providers/adapters/base';
+import type { AdapterType, HealthStatus } from '@/types/provider';
+
+/**
+ * POST /api/projects/:id/dialogue
+ * Generate structured dialogue turns from the episode outline.
+ * Each turn follows the strict JSON contract with speaker_id, delivery, and fact refs.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const userId = 'default-user';
+
+    const project = await prisma.project.findFirst({
+      where: { id, userId },
+      include: {
+        speakers: { include: { speaker: true } },
+        sources: { include: { facts: true } },
+        outline: true,
+      },
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    if (!project.outline) {
+      return NextResponse.json(
+        { error: 'Generate an outline first before creating dialogue.' },
+        { status: 400 }
+      );
+    }
+
+    if (project.speakers.length < 2) {
+      return NextResponse.json(
+        { error: 'At least 2 speakers are required.' },
+        { status: 400 }
+      );
+    }
+
+    // Resolve LLM provider
+    const llmConfig = await resolveLLMProvider(userId, project.lockedLlmId, project.routingMode);
+    if (!llmConfig) {
+      return NextResponse.json(
+        { error: 'No available LLM provider. Configure one in Provider Settings.' },
+        { status: 400 }
+      );
+    }
+
+    // Build dialogue generation prompt
+    const prompt = buildDialoguePrompt(project);
+
+    const adapter = getLLMAdapter(llmConfig.adapterType as AdapterType);
+    const response = await adapter.generateText(
+      {
+        prompt,
+        systemPrompt: DIALOGUE_SYSTEM_PROMPT,
+        model: llmConfig.model,
+        temperature: 0.8,
+        maxTokens: 8192,
+        responseFormat: 'json',
+      },
+      llmConfig.config
+    );
+
+    // Parse dialogue
+    let dialogue;
+    try {
+      dialogue = JSON.parse(response.text);
+    } catch {
+      return NextResponse.json(
+        { error: 'LLM returned invalid JSON for dialogue. Try regenerating.' },
+        { status: 500 }
+      );
+    }
+
+    if (!dialogue.turns || !Array.isArray(dialogue.turns) || dialogue.turns.length < 2) {
+      return NextResponse.json(
+        { error: 'Dialogue must contain at least 2 turns.' },
+        { status: 500 }
+      );
+    }
+
+    // Validate speaker IDs exist
+    const validSpeakerIds = new Set(project.speakers.map((ps) => ps.speaker.id));
+    const invalidTurns = dialogue.turns.filter(
+      (t: { speaker_id: string }) => !validSpeakerIds.has(t.speaker_id)
+    );
+    if (invalidTurns.length > 0) {
+      return NextResponse.json(
+        { error: `Invalid speaker_id in turns: ${invalidTurns.map((t: { id: string }) => t.id).join(', ')}` },
+        { status: 500 }
+      );
+    }
+
+    // Delete existing turns and save new ones
+    await prisma.dialogueTurn.deleteMany({ where: { projectId: id } });
+
+    const turnRecords = dialogue.turns.map((turn: {
+      id: string;
+      speaker_id: string;
+      text: string;
+      delivery?: { emotion?: string; pace?: string; pause_after_ms?: number };
+      source_fact_ids?: string[];
+      estimated_seconds?: number;
+    }, index: number) => ({
+      projectId: id,
+      turnIndex: index,
+      speakerId: turn.speaker_id,
+      text: turn.text,
+      delivery: turn.delivery || { emotion: 'neutral', pace: 'normal', pause_after_ms: 300 },
+      sourceFactIds: turn.source_fact_ids || [],
+      estimatedSeconds: turn.estimated_seconds || estimateSeconds(turn.text),
+    }));
+
+    await prisma.dialogueTurn.createMany({ data: turnRecords });
+
+    // Update project status
+    await prisma.project.update({
+      where: { id },
+      data: { status: 'DIALOGUE_READY' },
+    });
+
+    // Fetch the created turns
+    const savedTurns = await prisma.dialogueTurn.findMany({
+      where: { projectId: id },
+      orderBy: { turnIndex: 'asc' },
+    });
+
+    return NextResponse.json({
+      episode: {
+        title: project.title,
+        language: project.language,
+        target_duration_seconds: project.targetDuration || 300,
+      },
+      turns: savedTurns,
+      turnCount: savedTurns.length,
+      estimatedDuration: savedTurns.reduce((sum, t) => sum + (t.estimatedSeconds || 0), 0),
+      model: response.model,
+      latencyMs: response.latencyMs,
+    });
+  } catch (error) {
+    console.error('POST /api/projects/:id/dialogue error:', error);
+    return NextResponse.json(
+      { error: 'Dialogue generation failed', details: error instanceof Error ? error.message : 'Unknown' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * GET /api/projects/:id/dialogue
+ * Get current dialogue turns.
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const userId = 'default-user';
+
+    const project = await prisma.project.findFirst({ where: { id, userId } });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const turns = await prisma.dialogueTurn.findMany({
+      where: { projectId: id },
+      orderBy: { turnIndex: 'asc' },
+      include: { clip: true },
+    });
+
+    return NextResponse.json({
+      episode: {
+        title: project.title,
+        language: project.language,
+        target_duration_seconds: project.targetDuration || 300,
+      },
+      turns,
+      turnCount: turns.length,
+      estimatedDuration: turns.reduce((sum, t) => sum + (t.estimatedSeconds || 0), 0),
+    });
+  } catch (error) {
+    console.error('GET /api/projects/:id/dialogue error:', error);
+    return NextResponse.json({ error: 'Failed to fetch dialogue' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/projects/:id/dialogue
+ * Edit a specific turn's text or delivery.
+ * Body: { turnIndex: number, text?: string, delivery?: object }
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const userId = 'default-user';
+    const body = await request.json();
+
+    const project = await prisma.project.findFirst({ where: { id, userId } });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    if (body.turnIndex === undefined) {
+      return NextResponse.json({ error: 'turnIndex is required' }, { status: 400 });
+    }
+
+    const turn = await prisma.dialogueTurn.findUnique({
+      where: { projectId_turnIndex: { projectId: id, turnIndex: body.turnIndex } },
+    });
+
+    if (!turn) {
+      return NextResponse.json({ error: 'Turn not found' }, { status: 404 });
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.text !== undefined) {
+      updateData.text = body.text;
+      updateData.estimatedSeconds = estimateSeconds(body.text);
+      // Clear normalized text and clip since text changed
+      updateData.normalizedText = null;
+    }
+    if (body.delivery !== undefined) {
+      updateData.delivery = body.delivery;
+    }
+    if (body.speakerId !== undefined) {
+      updateData.speakerId = body.speakerId;
+    }
+
+    const updated = await prisma.dialogueTurn.update({
+      where: { projectId_turnIndex: { projectId: id, turnIndex: body.turnIndex } },
+      data: updateData,
+    });
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error('PATCH /api/projects/:id/dialogue error:', error);
+    return NextResponse.json({ error: 'Failed to update turn' }, { status: 500 });
+  }
+}
+
+// === Helpers ===
+
+const DIALOGUE_SYSTEM_PROMPT = `You are a podcast script writer. Generate natural, engaging multi-speaker dialogue in strict JSON format.
+
+Output ONLY valid JSON with this structure:
+{
+  "turns": [
+    {
+      "id": "turn_0001",
+      "speaker_id": "actual_speaker_id",
+      "text": "Spoken text in the episode language",
+      "delivery": {
+        "emotion": "friendly|curious|thoughtful|enthusiastic|confident|concerned",
+        "pace": "normal|slow|fast",
+        "pause_after_ms": 350
+      },
+      "source_fact_ids": [],
+      "estimated_seconds": 5.2
+    }
+  ]
+}
+
+CONVERSATION RULES:
+- Vary response lengths naturally (short reactions mixed with longer explanations)
+- Include follow-up questions from the host
+- Allow respectful disagreement occasionally
+- Reference earlier ideas ("Going back to what you said about...")
+- Use restrained reactions, not exaggerated agreement
+- Avoid identical turn lengths
+- Avoid excessive filler words
+- Avoid repeated "That's a great point" patterns
+- Avoid exaggerated emotion
+- Every data claim MUST reference a fact ID; if no fact supports it, describe as uncertain
+- Generate dialogue in the specified language
+- Turn IDs must follow pattern: turn_NNNN (zero-padded 4 digits)`;
+
+function buildDialoguePrompt(project: {
+  title: string;
+  topic?: string | null;
+  language: string;
+  targetDuration?: number | null;
+  style?: string | null;
+  speakers: Array<{
+    speakingShare?: number | null;
+    speaker: { id: string; name: string; role?: string | null; personality?: string | null; formality: number; energy: number; humor: number; assertiveness: number };
+  }>;
+  sources: Array<{ facts: Array<{ id: string; content: string }> }>;
+  outline: { segments: unknown } | null;
+}): string {
+  const speakers = project.speakers.map((ps) => ({
+    id: ps.speaker.id,
+    name: ps.speaker.name,
+    role: ps.speaker.role,
+    personality: ps.speaker.personality,
+    share: ps.speakingShare,
+    formality: ps.speaker.formality,
+    energy: ps.speaker.energy,
+    humor: ps.speaker.humor,
+    assertiveness: ps.speaker.assertiveness,
+  }));
+
+  const facts = project.sources.flatMap((s) =>
+    s.facts.map((f) => ({ id: f.id, content: f.content }))
+  );
+
+  const targetTurns = Math.max(6, Math.round((project.targetDuration || 300) / 8));
+
+  return `Generate podcast dialogue for:
+
+Title: ${project.title}
+Topic: ${project.topic || 'General discussion'}
+Language: ${project.language}
+Target Duration: ${project.targetDuration || 300} seconds
+Style: ${project.style || 'conversational'}
+Target turns: approximately ${targetTurns}
+
+Speakers:
+${speakers.map((s) => `- ID: "${s.id}" | Name: ${s.name} | Role: ${s.role || 'Speaker'} | Personality: ${s.personality || 'Neutral'} | Share: ${s.share ? Math.round(s.share * 100) + '%' : 'equal'} | Formality: ${s.formality}/100 | Energy: ${s.energy}/100 | Humor: ${s.humor}/100 | Assertiveness: ${s.assertiveness}/100`).join('\n')}
+
+Episode Outline:
+${JSON.stringify(project.outline?.segments, null, 2)}
+
+${facts.length > 0 ? `Available Facts (reference by ID in source_fact_ids):\n${facts.map((f) => `- [${f.id}] ${f.content}`).join('\n')}\n\nIMPORTANT: Only reference fact IDs for claims. Uncertain statements must NOT have fact IDs.` : 'No approved facts available. All statements should be presented as opinions or general knowledge.'}
+
+Generate engaging, natural dialogue following the outline structure. Use speaker IDs exactly as shown above.`;
+}
+
+function estimateSeconds(text: string): number {
+  // ~150 words per minute, ~5 chars per word
+  const wordCount = text.length / 5;
+  return Math.round((wordCount / 150) * 60 * 10) / 10;
+}
+
+// Reuse the resolveLLMProvider pattern from outline route
+interface ResolvedLLM {
+  adapterType: string;
+  model?: string;
+  config: AdapterConfig;
+}
+
+async function resolveLLMProvider(
+  userId: string,
+  lockedLlmId: string | null,
+  routingMode: string
+): Promise<ResolvedLLM | null> {
+  let provider;
+  if (lockedLlmId) {
+    provider = await prisma.provider.findFirst({
+      where: { id: lockedLlmId, userId, enabled: true, category: 'LLM' },
+      include: { secret: true, health: true },
+    });
+  } else {
+    const providers = await prisma.provider.findMany({
+      where: { userId, category: 'LLM', enabled: true },
+      include: { secret: true, health: true, capabilities: true, benchmarks: { take: 1, orderBy: { createdAt: 'desc' } } },
+    });
+
+    if (providers.length === 0) return null;
+
+    const routable: RoutableProvider[] = providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: 'LLM',
+      enabled: p.enabled,
+      priority: p.priority,
+      model: p.model || undefined,
+      allowSensitive: p.allowSensitive,
+      health: {
+        status: (p.health?.status || 'UNKNOWN') as HealthStatus,
+        avgLatencyMs: p.health?.avgLatencyMs || undefined,
+        successRate: p.health?.successRate || undefined,
+      },
+      benchmark: p.benchmarks.length > 0
+        ? { weightedScore: p.benchmarks[0]?.weightedScore || undefined, approved: p.benchmarks[0]?.approved || false }
+        : undefined,
+      costPerRequest: (p.costMetadata as Record<string, number> | null)?.costPerRequest,
+    }));
+
+    const engine = new RoutingEngine();
+    const recommendation = engine.recommend({ category: 'LLM', mode: routingMode as any }, routable);
+    if (!recommendation) return null;
+
+    provider = providers.find((p) => p.id === recommendation.providerId);
+  }
+
+  if (!provider) return null;
+
+  let apiKey = '';
+  if (provider.secret) {
+    apiKey = decryptApiKey({
+      encryptedKey: provider.secret.encryptedKey,
+      iv: provider.secret.iv,
+      authTag: provider.secret.authTag,
+    });
+  }
+
+  return {
+    adapterType: provider.adapterType,
+    model: provider.model || undefined,
+    config: {
+      baseUrl: provider.baseUrl || '',
+      apiKey,
+      model: provider.model || undefined,
+      endpointPath: provider.endpointPath || undefined,
+      authType: provider.authType,
+      authHeaderName: provider.authHeaderName || undefined,
+      customHeaders: (provider.customHeaders as Record<string, string>) || undefined,
+      timeoutMs: provider.timeoutMs,
+      requestTemplate: (provider.requestTemplate as Record<string, unknown>) || undefined,
+      responseJsonPath: provider.responseJsonPath || undefined,
+    },
+  };
+}
