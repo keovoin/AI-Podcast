@@ -38,6 +38,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [editingTurn, setEditingTurn] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
 
@@ -46,10 +47,14 @@ export default function ProjectDetailPage() {
   async function fetchProject() {
     try {
       const res = await fetch(`/api/projects/${id}`);
-      if (res.ok) setProject(await res.json());
-      else setActionError('Failed to load project');
+      if (res.ok) {
+        setProject(await res.json());
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionError(`Failed to load project: ${err.error || err.details || `HTTP ${res.status}`}`);
+      }
     } catch (e) {
-      setActionError('Network error loading project');
+      setActionError(`Network error loading project: ${e instanceof Error ? e.message : 'unknown'}`);
     } finally {
       setLoading(false);
     }
@@ -58,6 +63,7 @@ export default function ProjectDetailPage() {
   async function callAction(url: string, label: string, method = 'POST', body?: object) {
     setActionLoading(label);
     setActionError(null);
+    setActionSuccess(null);
     try {
       const res = await fetch(url, {
         method,
@@ -66,9 +72,10 @@ export default function ProjectDetailPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setActionError(data?.error || data?.details || `${label} failed (${res.status})`);
+        setActionError(data?.error || data?.details || `${label} failed (HTTP ${res.status})`);
         return null;
       }
+      setActionSuccess(`${label} completed successfully!`);
       await fetchProject();
       return data;
     } catch (e) {
@@ -169,6 +176,11 @@ export default function ProjectDetailPage() {
               {actionError}
             </div>
           )}
+          {actionSuccess && (
+            <div className="p-3 rounded bg-green-500/10 text-green-500 text-sm mb-4">
+              {actionSuccess}
+            </div>
+          )}
           <div className="flex gap-2 flex-wrap">
             <Button onClick={generateOutline} disabled={!!actionLoading} variant="outline">
               {actionLoading === 'outline' ? 'Generating Outline...' : '1. Generate Outline'}
@@ -215,6 +227,35 @@ export default function ProjectDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Outline */}
+      {project.outline && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-lg">Outline ({(project.outline.segments as unknown[]).length} segments)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {(project.outline.segments as Array<{ id: string; title: string; duration_seconds: number; lead_speaker_id: string; questions?: string[] }>).map((seg, i) => (
+                <div key={seg.id || i} className="p-3 border rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{seg.title}</span>
+                    <Badge variant="secondary">{seg.duration_seconds}s</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Lead: {speakerNames[seg.lead_speaker_id] || seg.lead_speaker_id}
+                  </p>
+                  {seg.questions && seg.questions.length > 0 && (
+                    <ul className="text-xs text-muted-foreground mt-1 list-disc list-inside">
+                      {seg.questions.map((q, qi) => <li key={qi}>{q}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Dialogue Editor */}
       <Card>
