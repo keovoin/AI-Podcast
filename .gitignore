@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build
+.next/
+out/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+prisma/migrations/*/migration.sql.bak
+
+# Test
+coverage/
+playwright-report/
+test-results/
+
+# Audio temp files
+/tmp/podcast-audio/
+*.mp3
+*.wav
+
+# Logs
+npm-debug.log*
+.npm/

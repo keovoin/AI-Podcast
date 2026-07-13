@@ -1,0 +1,461 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// User
+// =============================================================================
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  providers  Provider[]
+  projects   Project[]
+  speakers   Speaker[]
+  benchmarks ProviderBenchmark[]
+  auditLogs  AuditLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+// =============================================================================
+// Provider System
+// =============================================================================
+model Provider {
+  id              String           @id @default(cuid())
+  userId          String           @map("user_id")
+  name            String
+  category        ProviderCategory
+  adapterType     AdapterType      @map("adapter_type")
+  baseUrl         String?          @map("base_url")
+  endpointPath    String?          @map("endpoint_path")
+  model           String?
+  authType        AuthType         @default(BEARER) @map("auth_type")
+  authHeaderName  String?          @map("auth_header_name")
+  customHeaders   Json?            @map("custom_headers")
+  timeoutMs       Int              @default(30000) @map("timeout_ms")
+  enabled         Boolean          @default(true)
+  priority        Int              @default(50)
+  costMetadata    Json?            @map("cost_metadata")
+  monthlyBudget   Float?           @map("monthly_budget")
+  dataResidency   String?          @map("data_residency")
+  allowSensitive  Boolean          @default(false) @map("allow_sensitive")
+  requestTemplate Json?            @map("request_template")
+  responseJsonPath String?         @map("response_json_path")
+  audioResponseType AudioResponseType? @map("audio_response_type")
+  voiceIds        Json?            @map("voice_ids")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id])
+  secret       ProviderSecret?
+  capabilities ProviderCapability[]
+  health       ProviderHealth?
+  benchmarks   ProviderBenchmark[]
+  audioClips   AudioClip[]
+
+  @@map("providers")
+}
+
+enum ProviderCategory {
+  LLM
+  TTS
+  STT
+  EMBEDDING
+}
+
+enum AdapterType {
+  OPENAI_COMPATIBLE
+  CUSTOM_REST
+  AZURE_SPEECH
+  MOCK
+}
+
+enum AuthType {
+  BEARER
+  API_KEY_HEADER
+  QUERY_PARAM
+  CUSTOM
+  NONE
+}
+
+enum AudioResponseType {
+  BINARY
+  BASE64_JSON
+  DOWNLOAD_URL
+}
+
+model ProviderSecret {
+  id             String   @id @default(cuid())
+  providerId     String   @unique @map("provider_id")
+  encryptedKey   String   @map("encrypted_key")
+  iv             String
+  authTag        String   @map("auth_tag")
+  keySource      KeySource @default(DIRECT) @map("key_source")
+  envVarName     String?  @map("env_var_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@map("provider_secrets")
+}
+
+enum KeySource {
+  DIRECT
+  ENV_VARIABLE
+}
+
+model ProviderCapability {
+  id         String   @id @default(cuid())
+  providerId String   @map("provider_id")
+  capability String
+  languages  Json?
+  voiceCount Int?     @map("voice_count")
+  metadata   Json?
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, capability])
+  @@map("provider_capabilities")
+}
+
+model ProviderHealth {
+  id              String        @id @default(cuid())
+  providerId      String        @unique @map("provider_id")
+  status          HealthStatus  @default(UNKNOWN)
+  lastChecked     DateTime?     @map("last_checked")
+  lastLatencyMs   Int?          @map("last_latency_ms")
+  avgLatencyMs    Float?        @map("avg_latency_ms")
+  successRate     Float?        @map("success_rate")
+  totalRequests   Int           @default(0) @map("total_requests")
+  failedRequests  Int           @default(0) @map("failed_requests")
+  lastError       String?       @map("last_error")
+  consecutiveFails Int          @default(0) @map("consecutive_fails")
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@map("provider_health")
+}
+
+enum HealthStatus {
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  UNKNOWN
+}
+
+model ProviderBenchmark {
+  id              String   @id @default(cuid())
+  providerId      String   @map("provider_id")
+  userId          String   @map("user_id")
+  testCase        String   @map("test_case")
+  audioUrl        String?  @map("audio_url")
+  pronunciation   Float?
+  naturalness     Float?
+  cambodianAccent Float?   @map("cambodian_accent")
+  numberDateAcc   Float?   @map("number_date_accuracy")
+  codeSwitching   Float?   @map("code_switching")
+  emotion         Float?
+  longFormStab    Float?   @map("long_form_stability")
+  weightedScore   Float?   @map("weighted_score")
+  notes           String?
+  approved        Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@map("provider_benchmarks")
+}
+
+// =============================================================================
+// Project / Podcast
+// =============================================================================
+model Project {
+  id               String        @id @default(cuid())
+  userId           String        @map("user_id")
+  title            String
+  topic            String?
+  objective        String?
+  audience         String?
+  language         String        @default("km")
+  targetDuration   Int?          @map("target_duration_seconds")
+  style            String?
+  requiredPoints   Json?         @map("required_points")
+  excludedPoints   Json?         @map("excluded_points")
+  routingMode      RoutingMode   @default(AUTO) @map("routing_mode")
+  lockedLlmId     String?        @map("locked_llm_id")
+  lockedTtsId     String?        @map("locked_tts_id")
+  status           ProjectStatus @default(DRAFT)
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id])
+  speakers  ProjectSpeaker[]
+  sources   Source[]
+  outline   EpisodeOutline?
+  turns     DialogueTurn[]
+  clips     AudioClip[]
+  jobs      GenerationJob[]
+  transcript Transcript?
+  showNotes  ShowNotes?
+  exports    ExportPackage[]
+
+  @@map("projects")
+}
+
+enum RoutingMode {
+  AUTO
+  BEST_KHMER
+  CHEAPEST
+  FASTEST
+  PRIVATE_ONLY
+  MANUAL
+}
+
+enum ProjectStatus {
+  DRAFT
+  OUTLINE_READY
+  DIALOGUE_READY
+  GENERATING_AUDIO
+  AUDIO_READY
+  EXPORTED
+}
+
+model Speaker {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  name         String
+  role         String?
+  personality  String?
+  viewpoint    String?
+  voiceId      String?  @map("voice_id")
+  formality    Int      @default(50)
+  energy       Int      @default(50)
+  humor        Int      @default(30)
+  assertiveness Int     @default(50)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id])
+  projects ProjectSpeaker[]
+
+  @@map("speakers")
+}
+
+model ProjectSpeaker {
+  id            String  @id @default(cuid())
+  projectId     String  @map("project_id")
+  speakerId     String  @map("speaker_id")
+  speakingShare Float?  @map("speaking_share")
+  voiceOverride String? @map("voice_override")
+  reactions     Boolean @default(true)
+  interruptions Boolean @default(false)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  speaker Speaker @relation(fields: [speakerId], references: [id])
+
+  @@unique([projectId, speakerId])
+  @@map("project_speakers")
+}
+
+model Source {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  title     String
+  url       String?
+  content   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  facts   Fact[]
+
+  @@map("sources")
+}
+
+model Fact {
+  id        String   @id @default(cuid())
+  sourceId  String   @map("source_id")
+  content   String
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@map("facts")
+}
+
+model EpisodeOutline {
+  id        String   @id @default(cuid())
+  projectId String   @unique @map("project_id")
+  segments  Json
+  locked    Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("episode_outlines")
+}
+
+model DialogueTurn {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  turnIndex       Int      @map("turn_index")
+  speakerId       String   @map("speaker_id")
+  text            String
+  normalizedText  String?  @map("normalized_text")
+  delivery        Json?
+  sourceFactIds   Json?    @map("source_fact_ids")
+  estimatedSeconds Float?  @map("estimated_seconds")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project  Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clip     AudioClip?
+
+  @@unique([projectId, turnIndex])
+  @@map("dialogue_turns")
+}
+
+model AudioClip {
+  id           String   @id @default(cuid())
+  projectId    String   @map("project_id")
+  turnId       String   @unique @map("turn_id")
+  providerId   String   @map("provider_id")
+  voiceId      String   @map("voice_id")
+  textHash     String   @map("text_hash")
+  s3Key        String   @map("s3_key")
+  durationMs   Int      @map("duration_ms")
+  startTimeMs  Int?     @map("start_time_ms")
+  format       String   @default("mp3")
+  sizeBytes    Int?     @map("size_bytes")
+  cached       Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  turn     DialogueTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  provider Provider     @relation(fields: [providerId], references: [id])
+
+  @@index([textHash, providerId, voiceId])
+  @@map("audio_clips")
+}
+
+model GenerationJob {
+  id            String    @id @default(cuid())
+  projectId     String    @map("project_id")
+  type          JobType
+  status        JobStatus @default(QUEUED)
+  progress      Float     @default(0)
+  totalSteps    Int?      @map("total_steps")
+  completedSteps Int      @default(0) @map("completed_steps")
+  result        Json?
+  error         String?
+  idempotencyKey String?  @unique @map("idempotency_key")
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3) @map("max_attempts")
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  cancelledAt   DateTime? @map("cancelled_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("generation_jobs")
+}
+
+enum JobType {
+  OUTLINE
+  DIALOGUE
+  AUDIO_SINGLE
+  AUDIO_FULL
+  EXPORT
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  RETRYING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Transcript {
+  id        String   @id @default(cuid())
+  projectId String   @unique @map("project_id")
+  content   Json
+  srt       String?
+  vtt       String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("transcripts")
+}
+
+model ShowNotes {
+  id         String   @id @default(cuid())
+  projectId  String   @unique @map("project_id")
+  summary    String?
+  chapters   Json?
+  takeaways  Json?
+  factList   Json?    @map("fact_list")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("show_notes")
+}
+
+model ExportPackage {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  format      String
+  s3Key       String   @map("s3_key")
+  sizeBytes   Int?     @map("size_bytes")
+  manifest    Json?
+  includesAi  Boolean  @default(true) @map("includes_ai_disclosure")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("export_packages")
+}
+
+// =============================================================================
+// Audit / Logging
+// =============================================================================
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String
+  resource   String
+  resourceId String?  @map("resource_id")
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([action, createdAt])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}
