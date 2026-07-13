@@ -1,11 +1,12 @@
 import Link from 'next/link';
 
 const navItems = [
-  { href: '/', label: 'Home' },
-  { href: '/providers', label: 'Providers' },
   { href: '/projects', label: 'Projects' },
+  { href: '/providers', label: 'Providers' },
   { href: '/speakers', label: 'Speakers' },
-  { href: '/benchmark', label: 'Benchmark Lab' },
+  { href: '/benchmark', label: 'Benchmark' },
+  { href: '/exports', label: 'Exports' },
+  { href: '/usage', label: 'Usage' },
 ];
 
 export default function DashboardLayout({
