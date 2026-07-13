@@ -76,6 +76,14 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json(response);
   } catch (error) {
     console.error('GET /api/providers error:', error);
+    // Handle Prisma connection errors gracefully
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message.includes('prisma') || message.includes('connect') || message.includes('ECONNREFUSED') || message.includes('does not exist')) {
+      return NextResponse.json(
+        { error: 'Database not connected. Please run the SQL init script in your database.' },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to fetch providers' },
       { status: 500 }
@@ -91,7 +99,15 @@ export async function GET(_request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const validation = providerCreateSchema.safeParse(body);
+
+    // Strip empty strings — convert to undefined for Zod optional fields
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (value === '' || value === null) continue;
+      cleaned[key] = value;
+    }
+
+    const validation = providerCreateSchema.safeParse(cleaned);
 
     if (!validation.success) {
       return NextResponse.json(

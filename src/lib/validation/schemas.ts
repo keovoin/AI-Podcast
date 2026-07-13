@@ -23,7 +23,7 @@ export const providerCreateSchema = z.object({
   name: z.string().min(1).max(100),
   category: providerCategorySchema,
   adapterType: adapterTypeSchema,
-  baseUrl: z.string().url().optional(),
+  baseUrl: z.string().max(2000).optional(),
   endpointPath: z.string().max(500).optional(),
   apiKey: z.string().min(1).max(1000).optional(),
   model: z.string().max(200).optional(),
@@ -39,7 +39,7 @@ export const providerCreateSchema = z.object({
   allowSensitive: z.boolean().default(false),
   requestTemplate: z.record(z.unknown()).optional(),
   responseJsonPath: z.string().max(500).optional(),
-  audioResponseType: audioResponseTypeSchema.optional(),
+  audioResponseType: audioResponseTypeSchema.optional().nullable(),
   voiceIds: z.array(z.string()).optional(),
 });
 
