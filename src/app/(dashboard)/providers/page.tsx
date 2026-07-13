@@ -66,6 +66,8 @@ export default function ProvidersPage() {
       const res = await fetch(`/api/providers/${id}/test`, { method: 'POST' });
       const data = await res.json();
       setTestResult(data);
+      // Refresh provider list to update health badge
+      await fetchProviders();
     } catch (error) {
       setTestResult({ error: 'Test failed', details: String(error) });
     } finally {
