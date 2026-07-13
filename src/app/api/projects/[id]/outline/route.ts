@@ -52,25 +52,60 @@ export async function POST(
     const prompt = buildOutlinePrompt(project);
 
     const adapter = getLLMAdapter(llmConfig.adapterType as AdapterType);
-    const response = await adapter.generateText(
-      {
-        prompt,
-        systemPrompt: OUTLINE_SYSTEM_PROMPT,
-        model: llmConfig.model,
-        temperature: 0.7,
-        maxTokens: 4096,
-        responseFormat: 'json',
-      },
-      llmConfig.config
-    );
+    let response;
+    try {
+      response = await adapter.generateText(
+        {
+          prompt,
+          systemPrompt: OUTLINE_SYSTEM_PROMPT,
+          model: llmConfig.model,
+          temperature: 0.7,
+          maxTokens: 4096,
+          responseFormat: 'json',
+        },
+        { ...llmConfig.config, timeoutMs: Math.max(llmConfig.config.timeoutMs, 60000) }
+      );
+    } catch (genError) {
+      return NextResponse.json(
+        { error: `LLM generation failed: ${genError instanceof Error ? genError.message : String(genError)}` },
+        { status: 502 }
+      );
+    }
 
     // Parse and validate outline
     let outline;
     try {
-      outline = JSON.parse(response.text);
-    } catch {
+      // Clean up LLM response - strip markdown code fences and extra text
+      let jsonText = response.text.trim();
+      
+      // Remove markdown code fences (```json ... ``` or ``` ... ```)
+      const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        jsonText = codeBlockMatch[1]!.trim();
+      }
+      
+      // Try to find JSON object if response has extra text
+      if (!jsonText.startsWith('{') && !jsonText.startsWith('[')) {
+        const jsonStart = jsonText.indexOf('{');
+        if (jsonStart !== -1) {
+          jsonText = jsonText.slice(jsonStart);
+          // Find matching closing brace
+          let depth = 0;
+          for (let i = 0; i < jsonText.length; i++) {
+            if (jsonText[i] === '{') depth++;
+            if (jsonText[i] === '}') depth--;
+            if (depth === 0) {
+              jsonText = jsonText.slice(0, i + 1);
+              break;
+            }
+          }
+        }
+      }
+      
+      outline = JSON.parse(jsonText);
+    } catch (parseError) {
       return NextResponse.json(
-        { error: 'LLM returned invalid JSON. Try regenerating.' },
+        { error: 'LLM returned invalid JSON. Raw response (first 500 chars): ' + response.text.slice(0, 500) },
         { status: 500 }
       );
     }
@@ -111,13 +146,14 @@ export async function POST(
 
     return NextResponse.json({
       outline,
+      provider: llmConfig.adapterType,
       model: response.model,
       latencyMs: response.latencyMs,
     });
   } catch (error) {
     console.error('POST /api/projects/:id/outline error:', error);
     return NextResponse.json(
-      { error: 'Outline generation failed', details: error instanceof Error ? error.message : 'Unknown' },
+      { error: 'Outline generation failed', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
