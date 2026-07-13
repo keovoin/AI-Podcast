@@ -99,7 +99,15 @@ export async function GET(_request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const validation = providerCreateSchema.safeParse(body);
+
+    // Strip empty strings — convert to undefined for Zod optional fields
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (value === '' || value === null) continue;
+      cleaned[key] = value;
+    }
+
+    const validation = providerCreateSchema.safeParse(cleaned);
 
     if (!validation.success) {
       return NextResponse.json(

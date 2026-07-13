@@ -82,7 +82,14 @@ export async function PATCH(
     const userId = 'default-user';
     const body = await request.json();
 
-    const validation = providerUpdateSchema.safeParse(body);
+    // Strip empty strings — convert to undefined for Zod optional fields
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (value === '' || value === null) continue;
+      cleaned[key] = value;
+    }
+
+    const validation = providerUpdateSchema.safeParse(cleaned);
     if (!validation.success) {
       return NextResponse.json(
         { error: 'Validation failed', details: validation.error.flatten() },
