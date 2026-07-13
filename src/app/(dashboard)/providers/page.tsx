@@ -29,6 +29,7 @@ interface Provider {
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -43,10 +44,16 @@ export default function ProvidersPage() {
       const res = await fetch('/api/providers');
       if (res.ok) {
         const data = await res.json();
-        setProviders(data);
+        setProviders(Array.isArray(data) ? data : []);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setFetchError(errData.error || `Failed to load providers (${res.status})`);
+        setProviders([]);
       }
     } catch (error) {
       console.error('Failed to fetch providers:', error);
+      setFetchError('Cannot connect to API. Make sure the database is set up.');
+      setProviders([]);
     } finally {
       setLoading(false);
     }
@@ -125,6 +132,14 @@ export default function ProvidersPage() {
         </Button>
       </div>
 
+      {fetchError && (
+        <div className="p-4 rounded bg-destructive/10 text-destructive text-sm mb-6">
+          <p className="font-medium">Database Error</p>
+          <p>{fetchError}</p>
+          <p className="mt-2 text-xs">Make sure you ran the SQL init script in your Neon dashboard. See the README for setup instructions.</p>
+        </div>
+      )}
+
       {showForm && (
         <Card className="mb-8">
           <CardHeader>
@@ -150,16 +165,21 @@ export default function ProvidersPage() {
         </Card>
       )}
 
-      {/* Routing Explanation */}
-      <RoutingExplanation providers={providers} />
+      {/* Routing Explanation - only show if providers exist */}
+      {providers.length > 0 && (
+        <RoutingExplanation providers={providers} />
+      )}
 
       {/* Provider List */}
       <div className="grid gap-4 mt-8">
-        {providers.length === 0 ? (
+        {providers.length === 0 && !fetchError ? (
           <Card>
             <CardContent className="py-10 text-center">
               <p className="text-muted-foreground">
-                No providers configured. Add a provider to get started.
+                No providers configured. Click "Add Provider" to get started.
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Tip: For your AI Router endpoint, use "OPENAI_COMPATIBLE" adapter type with base URL: https://airouter-kh.fly.dev/v1
               </p>
             </CardContent>
           </Card>
@@ -170,7 +190,7 @@ export default function ProvidersPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold">{provider.name}</h3>
                         <Badge variant="secondary">{provider.category}</Badge>
                         <Badge variant="outline">{provider.adapterType}</Badge>
@@ -185,14 +205,14 @@ export default function ProvidersPage() {
                       <p className="text-sm text-muted-foreground mt-1">
                         {provider.model && `Model: ${provider.model}`}
                         {provider.hasApiKey && ' | API Key: ****'}
-                        {provider.health?.lastLatencyMs &&
+                        {provider.health?.lastLatencyMs != null &&
                           ` | Latency: ${provider.health.lastLatencyMs}ms`}
                         {provider.benchmarkScore != null &&
                           ` | Score: ${provider.benchmarkScore.toFixed(1)}/5`}
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Button
                       variant="outline"
                       size="sm"
@@ -228,8 +248,8 @@ export default function ProvidersPage() {
                   </div>
                 </div>
                 {testResult && testingId === null && (
-                  <div className="mt-3 p-3 rounded bg-muted text-sm">
-                    <pre>{JSON.stringify(testResult, null, 2)}</pre>
+                  <div className="mt-3 p-3 rounded bg-muted text-sm overflow-auto">
+                    <pre className="whitespace-pre-wrap">{JSON.stringify(testResult, null, 2)}</pre>
                   </div>
                 )}
               </CardContent>
