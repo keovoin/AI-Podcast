@@ -84,30 +84,33 @@ export class MockLLMAdapter implements LLMAdapter {
   }
 
   private generateMockResponse(request: LLMRequest): string {
+    // Check for outline request first (even with JSON format)
+    if (request.prompt.toLowerCase().includes('outline')) {
+      return this.generateMockOutline(request.prompt);
+    }
+
     // If JSON format requested, generate structured dialogue
     if (request.responseFormat === 'json') {
       return this.generateMockDialogue(request.prompt);
-    }
-
-    // Generate outline-like response
-    if (request.prompt.includes('outline')) {
-      return this.generateMockOutline(request.prompt);
     }
 
     return this.generateMockText(request.prompt);
   }
 
   private generateMockDialogue(prompt: string): string {
+    // Extract speaker IDs from prompt if possible
+    const speakerMatches = prompt.match(/ID: "([^"]+)"/g);
+    const speakerIds = speakerMatches
+      ? speakerMatches.map((m) => m.replace('ID: "', '').replace('"', ''))
+      : ['speaker_1', 'speaker_2'];
+    const s1 = speakerIds[0] || 'speaker_1';
+    const s2 = speakerIds[1] || 'speaker_2';
+
     const dialogue = {
-      episode: {
-        title: 'Mock Podcast Episode',
-        language: prompt.includes('km') ? 'km' : 'en',
-        target_duration_seconds: 300,
-      },
       turns: [
         {
           id: 'turn_0001',
-          speaker_id: 'speaker_1',
+          speaker_id: s1,
           text: 'Welcome to our podcast today. We have an exciting topic to discuss.',
           delivery: { emotion: 'friendly', pace: 'normal', pause_after_ms: 500 },
           source_fact_ids: [],
@@ -115,7 +118,7 @@ export class MockLLMAdapter implements LLMAdapter {
         },
         {
           id: 'turn_0002',
-          speaker_id: 'speaker_2',
+          speaker_id: s2,
           text: 'Thank you for having me. I am looking forward to sharing my thoughts on this.',
           delivery: { emotion: 'enthusiastic', pace: 'normal', pause_after_ms: 350 },
           source_fact_ids: [],
@@ -123,7 +126,7 @@ export class MockLLMAdapter implements LLMAdapter {
         },
         {
           id: 'turn_0003',
-          speaker_id: 'speaker_1',
+          speaker_id: s1,
           text: 'Let us start with the basics. Can you explain the core concept for our listeners?',
           delivery: { emotion: 'curious', pace: 'normal', pause_after_ms: 400 },
           source_fact_ids: [],
@@ -131,7 +134,7 @@ export class MockLLMAdapter implements LLMAdapter {
         },
         {
           id: 'turn_0004',
-          speaker_id: 'speaker_2',
+          speaker_id: s2,
           text: 'Of course. The fundamental idea is quite straightforward once you break it down into components.',
           delivery: { emotion: 'thoughtful', pace: 'normal', pause_after_ms: 300 },
           source_fact_ids: [],
@@ -139,7 +142,7 @@ export class MockLLMAdapter implements LLMAdapter {
         },
         {
           id: 'turn_0005',
-          speaker_id: 'speaker_1',
+          speaker_id: s1,
           text: 'That is a great point. How does this apply in practice?',
           delivery: { emotion: 'interested', pace: 'normal', pause_after_ms: 350 },
           source_fact_ids: [],
@@ -147,7 +150,7 @@ export class MockLLMAdapter implements LLMAdapter {
         },
         {
           id: 'turn_0006',
-          speaker_id: 'speaker_2',
+          speaker_id: s2,
           text: 'In practice, we see this pattern emerge across many different domains. Let me give you a concrete example.',
           delivery: { emotion: 'confident', pace: 'normal', pause_after_ms: 400 },
           source_fact_ids: [],
@@ -160,13 +163,19 @@ export class MockLLMAdapter implements LLMAdapter {
   }
 
   private generateMockOutline(_prompt: string): string {
+    // Extract speaker IDs from prompt if possible
+    const speakerMatches = _prompt.match(/ID: "([^"]+)"/g);
+    const speakerIds = speakerMatches
+      ? speakerMatches.map((m) => m.replace('ID: "', '').replace('"', ''))
+      : ['speaker_1', 'speaker_2'];
+
     const outline = {
       segments: [
         {
           id: 'seg_1',
           title: 'Introduction',
           duration_seconds: 60,
-          lead_speaker_id: 'speaker_1',
+          lead_speaker_id: speakerIds[0] || 'speaker_1',
           questions: ['What is the topic?', 'Why is it relevant?'],
           locked: false,
         },
@@ -174,7 +183,7 @@ export class MockLLMAdapter implements LLMAdapter {
           id: 'seg_2',
           title: 'Main Discussion',
           duration_seconds: 180,
-          lead_speaker_id: 'speaker_2',
+          lead_speaker_id: speakerIds[1] || 'speaker_2',
           questions: ['How does it work?', 'What are the implications?'],
           locked: false,
         },
@@ -182,7 +191,7 @@ export class MockLLMAdapter implements LLMAdapter {
           id: 'seg_3',
           title: 'Conclusion',
           duration_seconds: 60,
-          lead_speaker_id: 'speaker_1',
+          lead_speaker_id: speakerIds[0] || 'speaker_1',
           questions: ['What are the key takeaways?', 'What is next?'],
           locked: false,
         },

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -38,63 +37,76 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editingTurn, setEditingTurn] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
 
-  useEffect(() => {
-    fetchProject();
-  }, [id]);
+  useEffect(() => { fetchProject(); }, [id]);
 
   async function fetchProject() {
     try {
       const res = await fetch(`/api/projects/${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data);
-      }
+      if (res.ok) setProject(await res.json());
+      else setActionError('Failed to load project');
     } catch (e) {
-      console.error(e);
+      setActionError('Network error loading project');
     } finally {
       setLoading(false);
     }
   }
 
-  async function generateOutline() {
-    setActionLoading('outline');
+  async function callAction(url: string, label: string, method = 'POST', body?: object) {
+    setActionLoading(label);
+    setActionError(null);
     try {
-      await fetch(`/api/projects/${id}/outline`, { method: 'POST' });
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setActionError(data?.error || data?.details || `${label} failed (${res.status})`);
+        return null;
+      }
       await fetchProject();
+      return data;
+    } catch (e) {
+      setActionError(`${label} failed: ${e instanceof Error ? e.message : 'Network error'}`);
+      return null;
     } finally {
       setActionLoading(null);
     }
+  }
+
+  async function generateOutline() {
+    await callAction(`/api/projects/${id}/outline`, 'outline');
   }
 
   async function generateDialogue() {
-    setActionLoading('dialogue');
-    try {
-      await fetch(`/api/projects/${id}/dialogue`, { method: 'POST' });
-      await fetchProject();
-    } finally {
-      setActionLoading(null);
-    }
+    await callAction(`/api/projects/${id}/dialogue`, 'dialogue');
   }
 
   async function generateAudio(turnIndex?: number) {
-    setActionLoading(turnIndex !== undefined ? `audio-${turnIndex}` : 'audio');
-    try {
-      await fetch(`/api/projects/${id}/audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(turnIndex !== undefined ? { turnIndex } : {}),
-      });
-      await fetchProject();
-    } finally {
-      setActionLoading(null);
+    const label = turnIndex !== undefined ? `audio-${turnIndex}` : 'audio';
+    await callAction(`/api/projects/${id}/audio`, label, 'POST', turnIndex !== undefined ? { turnIndex } : undefined);
+  }
+
+  async function validate() {
+    const result = await callAction(`/api/projects/${id}/validate`, 'validate');
+    if (result) {
+      if (result.valid) {
+        setActionError(null);
+        alert(`Validation passed! ${result.stats.turnCount} turns, ${result.stats.totalEstimatedSeconds.toFixed(0)}s estimated.`);
+      } else {
+        setActionError(`Validation: ${result.errors.length} errors, ${result.warnings.length} warnings. First error: ${result.errors[0]?.message || 'none'}`);
+      }
     }
   }
 
   async function exportProject() {
     setActionLoading('export');
+    setActionError(null);
     try {
       const res = await fetch(`/api/projects/${id}/export`, { method: 'POST' });
       if (res.ok) {
@@ -105,29 +117,25 @@ export default function ProjectDetailPage() {
         a.download = `${project?.title || 'podcast'}_export.zip`;
         a.click();
         URL.revokeObjectURL(url);
+        await fetchProject();
+      } else {
+        const data = await res.json().catch(() => null);
+        setActionError(data?.error || 'Export failed');
       }
-      await fetchProject();
+    } catch (e) {
+      setActionError('Export failed: network error');
     } finally {
       setActionLoading(null);
     }
   }
 
   async function saveTurnEdit(turnIndex: number) {
-    await fetch(`/api/projects/${id}/dialogue`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ turnIndex, text: editText }),
-    });
+    await callAction(`/api/projects/${id}/dialogue`, 'save', 'PATCH', { turnIndex, text: editText });
     setEditingTurn(null);
-    await fetchProject();
-  }
-
-  async function regenerateTurn(turnIndex: number) {
-    await generateAudio(turnIndex);
   }
 
   if (loading) return <div className="container py-10"><p className="text-muted-foreground">Loading...</p></div>;
-  if (!project) return <div className="container py-10"><p>Project not found</p></div>;
+  if (!project) return <div className="container py-10"><p className="text-destructive">Project not found. Check the URL.</p></div>;
 
   const speakerNames: Record<string, string> = {};
   project.speakers.forEach((ps) => { speakerNames[ps.speaker.id] = ps.speaker.name; });
@@ -135,31 +143,56 @@ export default function ProjectDetailPage() {
   return (
     <div className="container py-10">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold">{project.title}</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <Badge>{project.status.replace('_', ' ')}</Badge>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <Badge>{project.status.replace(/_/g, ' ')}</Badge>
             <Badge variant="outline">{project.language}</Badge>
             <Badge variant="outline">{project.routingMode}</Badge>
             {project.targetDuration && <Badge variant="secondary">{Math.round(project.targetDuration / 60)} min</Badge>}
+            <Badge variant="secondary">{project.speakers.length} speakers</Badge>
+            <Badge variant="secondary">{project.turns.length} turns</Badge>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={generateOutline} disabled={!!actionLoading}>
-            {actionLoading === 'outline' ? 'Generating...' : 'Regenerate Outline'}
-          </Button>
-          <Button variant="outline" onClick={generateDialogue} disabled={!!actionLoading}>
-            {actionLoading === 'dialogue' ? 'Generating...' : 'Regenerate Dialogue'}
-          </Button>
-          <Button variant="outline" onClick={() => generateAudio()} disabled={!!actionLoading}>
-            {actionLoading === 'audio' ? 'Generating...' : 'Generate Audio'}
-          </Button>
-          <Button onClick={exportProject} disabled={!!actionLoading}>
-            {actionLoading === 'export' ? 'Exporting...' : 'Export ZIP'}
-          </Button>
-        </div>
       </div>
+
+      {/* Action Buttons */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-lg">Actions</CardTitle>
+          <CardDescription>Generate content step by step: Outline → Dialogue → Audio → Export</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {actionError && (
+            <div className="p-3 rounded bg-destructive/10 text-destructive text-sm mb-4">
+              {actionError}
+            </div>
+          )}
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={generateOutline} disabled={!!actionLoading} variant="outline">
+              {actionLoading === 'outline' ? 'Generating Outline...' : '1. Generate Outline'}
+            </Button>
+            <Button onClick={generateDialogue} disabled={!!actionLoading} variant="outline">
+              {actionLoading === 'dialogue' ? 'Generating Dialogue...' : '2. Generate Dialogue'}
+            </Button>
+            <Button onClick={validate} disabled={!!actionLoading || project.turns.length === 0} variant="outline">
+              {actionLoading === 'validate' ? 'Validating...' : '3. Validate'}
+            </Button>
+            <Button onClick={() => generateAudio()} disabled={!!actionLoading || project.turns.length === 0} variant="outline">
+              {actionLoading === 'audio' ? 'Generating Audio...' : '4. Generate Audio'}
+            </Button>
+            <Button onClick={exportProject} disabled={!!actionLoading || project.turns.length === 0}>
+              {actionLoading === 'export' ? 'Exporting...' : '5. Export ZIP'}
+            </Button>
+          </div>
+          {project.speakers.length < 2 && (
+            <p className="text-sm text-destructive mt-3">
+              You need at least 2 speakers to generate content. Add speakers from the project creation wizard or API.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Speakers */}
       <Card className="mb-6">
@@ -167,15 +200,19 @@ export default function ProjectDetailPage() {
           <CardTitle className="text-lg">Speakers ({project.speakers.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 flex-wrap">
-            {project.speakers.map((ps) => (
-              <div key={ps.speaker.id} className="p-3 border rounded-lg">
-                <p className="font-medium">{ps.speaker.name}</p>
-                <p className="text-sm text-muted-foreground">{ps.speaker.role || 'Speaker'}</p>
-                <p className="text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
-              </div>
-            ))}
-          </div>
+          {project.speakers.length === 0 ? (
+            <p className="text-muted-foreground">No speakers assigned to this project.</p>
+          ) : (
+            <div className="flex gap-4 flex-wrap">
+              {project.speakers.map((ps) => (
+                <div key={ps.speaker.id} className="p-3 border rounded-lg">
+                  <p className="font-medium">{ps.speaker.name}</p>
+                  <p className="text-sm text-muted-foreground">{ps.speaker.role || 'Speaker'}</p>
+                  <p className="text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -183,11 +220,13 @@ export default function ProjectDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Dialogue ({project.turns.length} turns)</CardTitle>
-          <CardDescription>Click a turn to edit. Use regenerate to re-synthesize audio for a single turn.</CardDescription>
+          <CardDescription>Click a turn to edit text. Click the reload icon to regenerate audio for one turn.</CardDescription>
         </CardHeader>
         <CardContent>
           {project.turns.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-center">No dialogue yet. Click "Regenerate Dialogue" above.</p>
+            <p className="text-muted-foreground py-4 text-center">
+              No dialogue yet. Click "1. Generate Outline" then "2. Generate Dialogue" above.
+            </p>
           ) : (
             <div className="space-y-2">
               {project.turns.map((turn) => (
@@ -197,7 +236,7 @@ export default function ProjectDetailPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge variant="secondary" className="text-xs">
                           {speakerNames[turn.speakerId] || turn.speakerId}
                         </Badge>
@@ -235,8 +274,8 @@ export default function ProjectDetailPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => regenerateTurn(turn.turnIndex)}
-                      disabled={actionLoading === `audio-${turn.turnIndex}`}
+                      onClick={() => generateAudio(turn.turnIndex)}
+                      disabled={!!actionLoading}
                       title="Regenerate audio for this turn only"
                     >
                       {actionLoading === `audio-${turn.turnIndex}` ? '...' : '🔄'}
@@ -252,9 +291,7 @@ export default function ProjectDetailPage() {
       {/* Exports */}
       {project.exports.length > 0 && (
         <Card className="mt-6">
-          <CardHeader>
-            <CardTitle className="text-lg">Exports</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">Exports</CardTitle></CardHeader>
           <CardContent>
             <div className="space-y-2">
               {project.exports.map((exp) => (

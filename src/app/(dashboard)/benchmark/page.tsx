@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,22 +10,12 @@ interface Provider {
   id: string;
   name: string;
   category: string;
-  hasBenchmark: boolean;
-  benchmarkScore?: number;
-  benchmarkApproved?: boolean;
 }
 
 interface BenchmarkResult {
   id: string;
   providerId: string;
   testCase: string;
-  pronunciation?: number;
-  naturalness?: number;
-  cambodianAccent?: number;
-  numberDateAcc?: number;
-  codeSwitching?: number;
-  emotion?: number;
-  longFormStab?: number;
   weightedScore?: number;
   notes?: string;
   approved: boolean;
@@ -34,14 +23,14 @@ interface BenchmarkResult {
 }
 
 const TEST_CASES = [
-  { id: 'conversation', label: 'Natural Conversation', text: '\u179F\u17BD\u179F\u17D2\u178F\u17B8! \u1790\u17D2\u1784\u17C3\u1793\u17C1\u17C7\u17A2\u17B6\u1780\u17B6\u179F\u17A2\u17B6\u178F\u17CB\u179A\u17B6\u17C6\u1784\u17C9\u17B6\u17C6\u1784\u17C9\u17B6\u178A\u17C2\u179A\u17D4' },
-  { id: 'formal', label: 'Formal Khmer', text: '\u179F\u17BC\u1798\u1782\u17C0\u179A\u1796\u17D0\u178F\u17CC\u1798\u17B6\u1793\u179C\u17B7\u1785\u17B6\u179A\u178E\u1780\u1789\u17D2\u1789\u17B6\u17A2\u17C6\u1796\u17B8\u1780\u17B6\u179A\u179F\u17D2\u179A\u17B6\u179C\u1787\u17D2\u179A\u17B6\u179C\u17D4' },
-  { id: 'numbers', label: 'Numbers/Decimals/%', text: '\u178F\u1798\u17D2\u179B\u17C3\u1793\u17C1\u17C7\u1782\u17BA 45.7% \u1793\u17C3\u1795\u179B\u17B7\u178F\u1795\u179B\u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793\u1780\u17BE\u1793\u17A1\u17BE\u1784 12.5%\u17D4' },
-  { id: 'dates', label: 'Dates/Time', text: '\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u178A\u1793\u17C5\u1790\u17D2\u1784\u17C3\u1791\u17B8 15/03/2025 \u1798\u17C9\u17C4\u1784 14:30\u17D4' },
-  { id: 'names', label: 'Cambodian Names/Locations', text: '\u179B\u17C4\u1780 \u179F\u17BB\u1781\u17B6 \u1793\u17C5\u1797\u17D2\u1793\u17C6\u1796\u17C1\u1789 \u178A\u17C2\u179B\u179F\u17D2\u1790\u17B7\u178F\u1793\u17C5\u1787\u17B7\u178F\u1781\u17B6\u1784\u179C\u178F\u17D2\u178F\u17A2\u1784\u17D2\u1782\u179A\u17D4' },
-  { id: 'codeswitching', label: 'Khmer-English Mix', text: '\u1781\u17D2\u1789\u17BB\u17C6\u1794\u17B6\u17A0\u17D2\u179C\u17C2\u179B data science \u1793\u17C5 university \u1793\u17B7\u1784\u178F\u17D2\u179A\u17BC\u179C\u1794\u17B6\u1793 deploy \u179B\u17BE machine learning model\u17D4' },
-  { id: 'questions', label: 'Questions & Polite Disagreement', text: '\u1781\u17D2\u1789\u17BB\u17C6\u1798\u17B7\u1793\u1799\u179B\u17CB\u179F\u17D2\u179A\u1794\u1791\u17C1 \u178F\u17C2\u1781\u17D2\u1789\u17BB\u17C6\u1782\u17B7\u178F\u1790\u17B6\u179C\u17B6\u179A\u17C0\u1784\u1793\u17C1\u17C7\u17A2\u17B6\u1785\u179F\u17D2\u1798\u17BB\u1782\u179F\u17D2\u1798\u17B6\u1789\u1787\u17B6\u1784\u17D4' },
-  { id: 'longform', label: 'Long Sentences', text: '\u1793\u17C5\u1780\u17D2\u1793\u17BB\u1784\u1796\u17C1\u179B\u178A\u17C2\u179B\u1796\u17D2\u179A\u17C7\u17A2\u17B6\u1791\u17B7\u178F\u17D2\u1799\u179A\u17C7\u1789\u17C9\u17BE\u1784\u17A1\u17BE\u1784\u179C\u17B7\u1789 \u1781\u17D2\u1789\u17BB\u17C6\u178F\u17D2\u179A\u17BC\u179C\u178F\u17C2\u1791\u17B6\u1789\u1780\u17B6\u179A\u17A2\u1794\u17CB\u179A\u17C6 \u178A\u17C4\u1799\u179F\u17B6\u179A\u178F\u17C2\u1798\u17BD\u1799\u1782\u178F\u17CB\u179C\u17B6\u178A\u17C2\u179B\u1787\u17B6\u1780\u17B6\u179A\u179F\u17D2\u179A\u17B6\u179C\u1787\u17D2\u179A\u17B6\u179C\u17A2\u17C6\u1796\u17B8\u179C\u17B7\u179F\u17D0\u1799\u178A\u17C2\u179B\u17A2\u17D2\u1793\u1780\u179F\u17D2\u179A\u17B6\u179C\u1787\u17D2\u179A\u17B6\u179C\u1794\u17B6\u1793\u1792\u17D2\u179C\u17BE\u17D4' },
+  { id: 'conversation', label: 'Natural Conversation' },
+  { id: 'formal', label: 'Formal Khmer' },
+  { id: 'numbers', label: 'Numbers/Decimals/%' },
+  { id: 'dates', label: 'Dates/Time' },
+  { id: 'names', label: 'Cambodian Names/Locations' },
+  { id: 'codeswitching', label: 'Khmer-English Mix' },
+  { id: 'questions', label: 'Questions & Polite Disagreement' },
+  { id: 'longform', label: 'Long Sentences' },
 ];
 
 const DIMENSIONS = [
@@ -60,36 +49,39 @@ export default function BenchmarkPage() {
   const [selectedCase, setSelectedCase] = useState(TEST_CASES[0]!.id);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState<BenchmarkResult[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loadingProviders, setLoadingProviders] = useState(true);
 
   useEffect(() => {
-    fetch('/api/providers').then((r) => r.json()).then((data) => {
-      const tts = data.filter((p: Provider) => p.category === 'TTS');
-      setProviders(tts);
-      if (tts.length > 0) setSelectedProvider(tts[0].id);
-    });
+    loadProviders();
     fetchResults();
   }, []);
+
+  async function loadProviders() {
+    try {
+      const res = await fetch('/api/providers');
+      if (res.ok) {
+        const data = await res.json();
+        // Show ALL providers (not just TTS) so user can benchmark any
+        const all = Array.isArray(data) ? data : [];
+        setProviders(all);
+        if (all.length > 0 && !selectedProvider) {
+          setSelectedProvider(all[0].id);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingProviders(false);
+    }
+  }
 
   async function fetchResults() {
     try {
       const res = await fetch('/api/benchmark');
       if (res.ok) setResults(await res.json());
     } catch (e) { console.error(e); }
-  }
-
-  async function generateTestAudio() {
-    if (!selectedProvider) return;
-    setGenerating(true);
-    try {
-      await fetch(`/api/providers/${selectedProvider}/benchmark`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testCase: selectedCase }),
-      });
-    } finally { setGenerating(false); }
   }
 
   async function saveRating() {
@@ -100,7 +92,7 @@ export default function BenchmarkPage() {
         return sum + (scores[d.key] || 3) * d.weight;
       }, 0);
 
-      await fetch('/api/benchmark', {
+      const res = await fetch('/api/benchmark', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,63 +104,79 @@ export default function BenchmarkPage() {
           approved: weighted >= 3.5,
         }),
       });
-      setScores({}); setNotes('');
-      await fetchResults();
-    } finally { setSaving(false); }
-  }
 
-  const currentCase = TEST_CASES.find((c) => c.id === selectedCase);
+      if (res.ok) {
+        setScores({});
+        setNotes('');
+        await fetchResults();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to save');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="container py-10">
       <h1 className="text-3xl font-bold mb-2">Khmer Benchmark Lab</h1>
       <p className="text-muted-foreground mb-8">
-        Compare TTS providers using standardized Khmer test cases. Rate 1-5 for each dimension.
+        Rate provider quality using standardized Khmer test cases. Score 1-5 per dimension.
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Test & Rate */}
+        {/* Left: Rate */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Generate Test Audio</CardTitle>
-              <CardDescription>Select a provider and test case to generate audio for rating</CardDescription>
+              <CardTitle>Select Provider & Test Case</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label>TTS Provider</Label>
-                  <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                    {providers.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+                  <Label>Provider</Label>
+                  {loadingProviders ? (
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                  ) : providers.length === 0 ? (
+                    <p className="text-sm text-destructive">No providers configured. Add one in Provider Settings first.</p>
+                  ) : (
+                    <select
+                      value={selectedProvider}
+                      onChange={(e) => setSelectedProvider(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Test Case</Label>
-                  <select value={selectedCase} onChange={(e) => setSelectedCase(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <select
+                    value={selectedCase}
+                    onChange={(e) => setSelectedCase(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
                     {TEST_CASES.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
                     ))}
                   </select>
                 </div>
               </div>
-              <div className="p-3 rounded bg-muted text-sm font-mono">{currentCase?.text}</div>
-              <Button onClick={generateTestAudio} disabled={generating || !selectedProvider}>
-                {generating ? 'Generating...' : 'Generate Audio'}
-              </Button>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle>Rate Quality (1-5)</CardTitle>
-              <CardDescription>Score each dimension after listening to the generated audio</CardDescription>
+              <CardDescription>Score each dimension after testing the provider</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {DIMENSIONS.map((d) => (
                 <div key={d.key} className="flex items-center gap-4">
-                  <span className="w-40 text-sm">{d.label} ({Math.round(d.weight * 100)}%)</span>
+                  <span className="w-44 text-sm">{d.label} ({Math.round(d.weight * 100)}%)</span>
                   <div className="flex gap-1">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <Button
@@ -187,7 +195,7 @@ export default function BenchmarkPage() {
                 <Label>Notes</Label>
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="Additional observations..." />
               </div>
-              <Button onClick={saveRating} disabled={saving || Object.keys(scores).length === 0}>
+              <Button onClick={saveRating} disabled={saving || !selectedProvider || Object.keys(scores).length === 0}>
                 {saving ? 'Saving...' : 'Save Rating'}
               </Button>
             </CardContent>
@@ -195,12 +203,12 @@ export default function BenchmarkPage() {
         </div>
 
         {/* Right: Results */}
-        <div className="space-y-4">
+        <div>
           <Card>
             <CardHeader><CardTitle className="text-lg">Results</CardTitle></CardHeader>
             <CardContent>
               {results.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No benchmark results yet.</p>
+                <p className="text-sm text-muted-foreground">No benchmark results yet. Rate a provider above.</p>
               ) : (
                 <div className="space-y-3">
                   {results.map((r) => (

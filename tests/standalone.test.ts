@@ -439,11 +439,10 @@ describe('MockLLMAdapter', () => {
 
   test('generates structured JSON dialogue', async () => {
     const response = await adapter.generateText(
-      { prompt: 'Generate dialogue', responseFormat: 'json' },
+      { prompt: 'Generate dialogue for speakers', responseFormat: 'json' },
       mockConfig
     );
     const parsed = JSON.parse(response.text);
-    expect(parsed.episode).toBeDefined();
     expect(Array.isArray(parsed.turns)).toBe(true);
     expect(parsed.turns.length).toBeGreaterThan(0);
     expect(parsed.turns[0].id).toMatch(/^turn_\d{4}$/);
