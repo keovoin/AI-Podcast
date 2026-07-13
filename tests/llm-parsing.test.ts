@@ -74,6 +74,48 @@ describe('extractSegments', () => {
   });
 });
 
+describe('extractTurns - script strings', () => {
+  test('splits a single script string into lines', () => {
+    const r = extractTurns('{"script":"Piseth: Hello there\\nSreymom: Hi, thanks for having me"}');
+    expect(r.length).toBe(2);
+  });
+  test('handles whole response as plain script string', () => {
+    const r = extractTurns('"Piseth: Line one\\nSreymom: Line two\\nPiseth: Line three"');
+    expect(r.length).toBe(3);
+  });
+});
+
+describe('normalizeTurns - string turns', () => {
+  test('parses "Name: text" string turns', () => {
+    const r = normalizeTurns(['Piseth: Hello there', 'Sreymom: Hi there'], speakers);
+    expect(r.length).toBe(2);
+    expect(r[0]!.speakerId).toBe('cuid-host-abc');
+    expect(r[0]!.text).toBe('Hello there');
+    expect(r[1]!.speakerId).toBe('cuid-guest-xyz');
+  });
+  test('parses "**Name**: text" markdown string turns', () => {
+    const r = normalizeTurns(['**Piseth**: Welcome', '**Sreymom**: Thanks'], speakers);
+    expect(r[0]!.text).toBe('Welcome');
+    expect(r[0]!.speakerId).toBe('cuid-host-abc');
+  });
+  test('parses speaker prefix embedded in object text field', () => {
+    const r = normalizeTurns([
+      { text: 'Piseth: Question one?' },
+      { text: 'Sreymom: My answer.' },
+    ], speakers);
+    expect(r[0]!.speakerId).toBe('cuid-host-abc');
+    expect(r[0]!.text).toBe('Question one?');
+  });
+  test('handles utterance and character fields', () => {
+    const r = normalizeTurns([
+      { character: 'Piseth', utterance: 'hello' },
+      { character: 'Sreymom', utterance: 'world' },
+    ], speakers);
+    expect(r[0]!.text).toBe('hello');
+    expect(r[0]!.speakerId).toBe('cuid-host-abc');
+  });
+});
+
 describe('normalizeTurns - speaker mapping', () => {
   test('maps exact CUID', () => {
     const r = normalizeTurns([

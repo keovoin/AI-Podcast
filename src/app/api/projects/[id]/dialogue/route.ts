@@ -20,6 +20,11 @@ export async function POST(
   try {
     const { id } = await params;
     const userId = 'default-user';
+    const body = await request.json().catch(() => ({}));
+    const targetTurns: number | undefined =
+      typeof body?.targetTurns === 'number' && body.targetTurns > 0
+        ? Math.min(Math.round(body.targetTurns), 100)
+        : undefined;
 
     const project = await prisma.project.findFirst({
       where: { id, userId },
@@ -58,7 +63,7 @@ export async function POST(
     }
 
     // Build dialogue generation prompt
-    const prompt = buildDialoguePrompt(project);
+    const prompt = buildDialoguePrompt(project, targetTurns);
 
     const adapter = getLLMAdapter(llmConfig.adapterType as AdapterType);
     let response;
@@ -116,7 +121,12 @@ export async function POST(
 
     if (normalized.length < 2) {
       return NextResponse.json(
-        { error: 'Could not extract valid turns with speaker and text.' },
+        {
+          error:
+            'Could not extract valid turns with speaker and text. ' +
+            'The provider returned an unexpected format. Raw output (first 800 chars): ' +
+            response.text.slice(0, 800),
+        },
         { status: 500 }
       );
     }
@@ -265,6 +275,138 @@ export async function PATCH(
   }
 }
 
+/**
+ * PUT /api/projects/:id/dialogue
+ * Add a new custom turn (user-authored), or delete a turn.
+ * Body to add:    { action: 'add', speakerId, text, insertAfter?: number, delivery? }
+ * Body to delete: { action: 'delete', turnIndex: number }
+ */
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const userId = 'default-user';
+    const body = await request.json();
+
+    const project = await prisma.project.findFirst({
+      where: { id, userId },
+      include: { speakers: { include: { speaker: true } } },
+    });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const existingTurns = await prisma.dialogueTurn.findMany({
+      where: { projectId: id },
+      orderBy: { turnIndex: 'asc' },
+    });
+
+    if (body.action === 'delete') {
+      if (body.turnIndex === undefined) {
+        return NextResponse.json({ error: 'turnIndex is required' }, { status: 400 });
+      }
+      // Remove the turn and re-index the rest
+      const remaining = existingTurns.filter((t) => t.turnIndex !== body.turnIndex);
+      await prisma.dialogueTurn.deleteMany({ where: { projectId: id } });
+      if (remaining.length > 0) {
+        await prisma.dialogueTurn.createMany({
+          data: remaining.map((t, i) => ({
+            projectId: id,
+            turnIndex: i,
+            speakerId: t.speakerId,
+            text: t.text,
+            delivery: t.delivery ?? undefined,
+            sourceFactIds: t.sourceFactIds ?? undefined,
+            estimatedSeconds: t.estimatedSeconds,
+          })),
+        });
+      }
+      const updated = await prisma.dialogueTurn.findMany({
+        where: { projectId: id },
+        orderBy: { turnIndex: 'asc' },
+      });
+      return NextResponse.json({ turns: updated, turnCount: updated.length });
+    }
+
+    // Default: add a new turn
+    const { speakerId, text, insertAfter, delivery } = body;
+    if (!speakerId || !text) {
+      return NextResponse.json({ error: 'speakerId and text are required' }, { status: 400 });
+    }
+
+    // Validate speaker belongs to project
+    const validSpeaker = project.speakers.some((ps) => ps.speaker.id === speakerId);
+    if (!validSpeaker) {
+      return NextResponse.json({ error: 'speakerId is not a speaker on this project' }, { status: 400 });
+    }
+
+    // Determine insert position (default: append at end)
+    const insertPos =
+      insertAfter === undefined || insertAfter === null
+        ? existingTurns.length
+        : Math.min(insertAfter + 1, existingTurns.length);
+
+    // Rebuild turn list with the new turn inserted
+    const newTurn = {
+      speakerId,
+      text: String(text),
+      delivery: delivery || { emotion: 'neutral', pace: 'normal', pause_after_ms: 300 },
+      sourceFactIds: [] as string[],
+      estimatedSeconds: estimateSeconds(String(text)),
+    };
+
+    const rebuilt = [
+      ...existingTurns.slice(0, insertPos).map((t) => ({
+        speakerId: t.speakerId,
+        text: t.text,
+        delivery: t.delivery ?? undefined,
+        sourceFactIds: t.sourceFactIds ?? undefined,
+        estimatedSeconds: t.estimatedSeconds,
+      })),
+      newTurn,
+      ...existingTurns.slice(insertPos).map((t) => ({
+        speakerId: t.speakerId,
+        text: t.text,
+        delivery: t.delivery ?? undefined,
+        sourceFactIds: t.sourceFactIds ?? undefined,
+        estimatedSeconds: t.estimatedSeconds,
+      })),
+    ];
+
+    await prisma.dialogueTurn.deleteMany({ where: { projectId: id } });
+    await prisma.dialogueTurn.createMany({
+      data: rebuilt.map((t, i) => ({
+        projectId: id,
+        turnIndex: i,
+        speakerId: t.speakerId,
+        text: t.text,
+        delivery: t.delivery ?? undefined,
+        sourceFactIds: t.sourceFactIds ?? undefined,
+        estimatedSeconds: t.estimatedSeconds,
+      })),
+    });
+
+    // Ensure project status reflects dialogue exists
+    if (project.status === 'DRAFT' || project.status === 'OUTLINE_READY') {
+      await prisma.project.update({ where: { id }, data: { status: 'DIALOGUE_READY' } });
+    }
+
+    const updated = await prisma.dialogueTurn.findMany({
+      where: { projectId: id },
+      orderBy: { turnIndex: 'asc' },
+    });
+    return NextResponse.json({ turns: updated, turnCount: updated.length });
+  } catch (error) {
+    console.error('PUT /api/projects/:id/dialogue error:', error);
+    return NextResponse.json(
+      { error: 'Failed to add/delete turn', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}
+
 // === Helpers ===
 
 const DIALOGUE_SYSTEM_PROMPT = `You are a podcast script writer. Generate natural, engaging multi-speaker dialogue in strict JSON format.
@@ -313,7 +455,7 @@ function buildDialoguePrompt(project: {
   }>;
   sources: Array<{ facts: Array<{ id: string; content: string }> }>;
   outline: { segments: unknown } | null;
-}): string {
+}, requestedTurns?: number): string {
   const speakers = project.speakers.map((ps) => ({
     id: ps.speaker.id,
     name: ps.speaker.name,
@@ -330,7 +472,7 @@ function buildDialoguePrompt(project: {
     s.facts.map((f) => ({ id: f.id, content: f.content }))
   );
 
-  const targetTurns = Math.max(6, Math.round((project.targetDuration || 300) / 8));
+  const targetTurns = requestedTurns ?? Math.max(6, Math.round((project.targetDuration || 300) / 8));
 
   return `Generate podcast dialogue for:
 

@@ -41,6 +41,12 @@ export default function ProjectDetailPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [editingTurn, setEditingTurn] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
+  const [targetTurns, setTargetTurns] = useState<string>('');
+  // Add-turn form state
+  const [addingAfter, setAddingAfter] = useState<number | null>(null);
+  const [newTurnSpeaker, setNewTurnSpeaker] = useState('');
+  const [newTurnText, setNewTurnText] = useState('');
+  const [showAddAtEnd, setShowAddAtEnd] = useState(false);
 
   useEffect(() => { fetchProject(); }, [id]);
 
@@ -91,7 +97,35 @@ export default function ProjectDetailPage() {
   }
 
   async function generateDialogue() {
-    await callAction(`/api/projects/${id}/dialogue`, 'dialogue');
+    const tt = parseInt(targetTurns, 10);
+    const body = !isNaN(tt) && tt > 0 ? { targetTurns: tt } : undefined;
+    await callAction(`/api/projects/${id}/dialogue`, 'dialogue', 'POST', body);
+  }
+
+  async function addTurn(insertAfter: number | null) {
+    if (!newTurnSpeaker || !newTurnText.trim()) {
+      setActionError('Select a speaker and enter text for the new turn.');
+      return;
+    }
+    const result = await callAction(`/api/projects/${id}/dialogue`, 'add turn', 'PUT', {
+      action: 'add',
+      speakerId: newTurnSpeaker,
+      text: newTurnText.trim(),
+      insertAfter,
+    });
+    if (result) {
+      setNewTurnText('');
+      setAddingAfter(null);
+      setShowAddAtEnd(false);
+    }
+  }
+
+  async function deleteTurn(turnIndex: number) {
+    if (!confirm('Delete this turn?')) return;
+    await callAction(`/api/projects/${id}/dialogue`, 'delete turn', 'PUT', {
+      action: 'delete',
+      turnIndex,
+    });
   }
 
   async function generateAudio(turnIndex?: number) {
@@ -185,9 +219,21 @@ export default function ProjectDetailPage() {
             <Button onClick={generateOutline} disabled={!!actionLoading} variant="outline">
               {actionLoading === 'outline' ? 'Generating Outline...' : '1. Generate Outline'}
             </Button>
-            <Button onClick={generateDialogue} disabled={!!actionLoading} variant="outline">
-              {actionLoading === 'dialogue' ? 'Generating Dialogue...' : '2. Generate Dialogue'}
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button onClick={generateDialogue} disabled={!!actionLoading} variant="outline">
+                {actionLoading === 'dialogue' ? 'Generating Dialogue...' : '2. Generate Dialogue'}
+              </Button>
+              <input
+                type="number"
+                min={2}
+                max={100}
+                value={targetTurns}
+                onChange={(e) => setTargetTurns(e.target.value)}
+                placeholder="# turns"
+                title="Optional: number of turns to generate"
+                className="h-10 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+            </div>
             <Button onClick={validate} disabled={!!actionLoading || project.turns.length === 0} variant="outline">
               {actionLoading === 'validate' ? 'Validating...' : '3. Validate'}
             </Button>
@@ -261,7 +307,7 @@ export default function ProjectDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Dialogue ({project.turns.length} turns)</CardTitle>
-          <CardDescription>Click a turn to edit text. Click the reload icon to regenerate audio for one turn.</CardDescription>
+          <CardDescription>Click text to edit. Use 🔄 to regenerate audio, ➕ to insert a turn, 🗑 to delete.</CardDescription>
         </CardHeader>
         <CardContent>
           {project.turns.length === 0 ? (
@@ -312,19 +358,142 @@ export default function ProjectDetailPage() {
                         </p>
                       )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => generateAudio(turn.turnIndex)}
-                      disabled={!!actionLoading}
-                      title="Regenerate audio for this turn only"
-                    >
-                      {actionLoading === `audio-${turn.turnIndex}` ? '...' : '🔄'}
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => generateAudio(turn.turnIndex)}
+                        disabled={!!actionLoading}
+                        title="Regenerate audio for this turn"
+                      >
+                        {actionLoading === `audio-${turn.turnIndex}` ? '...' : '🔄'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setAddingAfter(turn.turnIndex); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
+                        disabled={!!actionLoading}
+                        title="Insert a new turn after this one"
+                      >
+                        ➕
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteTurn(turn.turnIndex)}
+                        disabled={!!actionLoading}
+                        title="Delete this turn"
+                      >
+                        🗑
+                      </Button>
+                    </div>
                   </div>
+
+                  {/* Inline add-turn form (insert after this turn) */}
+                  {addingAfter === turn.turnIndex && (
+                    <div className="mt-3 p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
+                      <p className="text-xs font-medium">Insert new turn after #{turn.turnIndex + 1}</p>
+                      <select
+                        value={newTurnSpeaker}
+                        onChange={(e) => setNewTurnSpeaker(e.target.value)}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                      >
+                        {project.speakers.map((ps) => (
+                          <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={newTurnText}
+                        onChange={(e) => setNewTurnText(e.target.value)}
+                        placeholder="Enter the turn text..."
+                        className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => addTurn(turn.turnIndex)} disabled={!!actionLoading}>
+                          {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setAddingAfter(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* Add turn at the end */}
+              {showAddAtEnd ? (
+                <div className="p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
+                  <p className="text-xs font-medium">Add new turn at the end</p>
+                  <select
+                    value={newTurnSpeaker}
+                    onChange={(e) => setNewTurnSpeaker(e.target.value)}
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {project.speakers.map((ps) => (
+                      <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
+                    ))}
+                  </select>
+                  <textarea
+                    value={newTurnText}
+                    onChange={(e) => setNewTurnText(e.target.value)}
+                    placeholder="Enter the turn text..."
+                    className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => addTurn(null)} disabled={!!actionLoading}>
+                      {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowAddAtEnd(false)}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setShowAddAtEnd(true); setAddingAfter(null); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
+                >
+                  ➕ Add Turn
+                </Button>
+              )}
             </div>
+          )}
+
+          {/* When no turns exist, still allow manually adding the first ones */}
+          {project.turns.length === 0 && project.speakers.length >= 1 && (
+            showAddAtEnd ? (
+              <div className="mt-4 p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
+                <p className="text-xs font-medium">Add a turn manually</p>
+                <select
+                  value={newTurnSpeaker}
+                  onChange={(e) => setNewTurnSpeaker(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  {project.speakers.map((ps) => (
+                    <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
+                  ))}
+                </select>
+                <textarea
+                  value={newTurnText}
+                  onChange={(e) => setNewTurnText(e.target.value)}
+                  placeholder="Enter the turn text..."
+                  className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => addTurn(null)} disabled={!!actionLoading}>
+                    {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowAddAtEnd(false)}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                className="mt-4"
+                variant="outline"
+                size="sm"
+                onClick={() => { setShowAddAtEnd(true); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
+              >
+                ➕ Add Turn Manually
+              </Button>
+            )
           )}
         </CardContent>
       </Card>

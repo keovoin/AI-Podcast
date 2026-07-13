@@ -70,12 +70,34 @@ export function extractTurns(rawText: string): unknown[] {
     for (const c of candidates) {
       if (Array.isArray(c)) return c;
     }
+    // A single big script string -> split into non-empty lines
+    for (const key of ['script', 'dialogue', 'text', 'content', 'transcript']) {
+      const v = obj[key];
+      if (typeof v === 'string' && v.trim()) {
+        const lines = splitScriptLines(v);
+        if (lines.length >= 2) return lines;
+      }
+    }
     for (const value of Object.values(obj)) {
       if (Array.isArray(value) && value.length > 0) return value;
     }
   }
 
+  // Whole response is a plain string script
+  if (typeof parsed === 'string' && parsed.trim()) {
+    const lines = splitScriptLines(parsed);
+    if (lines.length >= 2) return lines;
+  }
+
   return [];
+}
+
+/** Split a multi-line script into individual line strings. */
+function splitScriptLines(script: string): string[] {
+  return script
+    .split(/\r?\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
 }
 
 /** Extract a segments array (for outlines) from arbitrary LLM output. */
@@ -106,6 +128,34 @@ export interface NormalizedTurn {
   estimatedSeconds: number;
 }
 
+/**
+ * Some providers return turns as plain strings ("Piseth: Hello there")
+ * or the whole dialogue as one big string with newlines. This splits a
+ * string into { speaker, text } parts when a "Name: text" pattern exists.
+ */
+function parseStringTurn(
+  raw: string,
+  speakerNames: string[]
+): { speaker?: string; text: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Match "Speaker: text" or "**Speaker**: text" or "[Speaker]: text"
+  const match = trimmed.match(/^\s*[*\[]*\s*([A-Za-z0-9_\u1780-\u17FF .'-]{1,40}?)\s*[*\]]*\s*[:：\-]\s*(.+)$/s);
+  if (match) {
+    const possibleSpeaker = match[1]!.trim();
+    const text = match[2]!.trim();
+    // Only treat as speaker if it loosely matches a known name or looks like a label
+    const isKnown = speakerNames.some(
+      (n) => n.toLowerCase() === possibleSpeaker.toLowerCase()
+    );
+    if (isKnown || possibleSpeaker.split(/\s+/).length <= 3) {
+      return { speaker: possibleSpeaker, text };
+    }
+  }
+  return { text: trimmed };
+}
+
 export function estimateSeconds(text: string): number {
   // ~150 words per minute, ~5 chars per word
   const wordCount = text.length / 5;
@@ -125,19 +175,47 @@ export function normalizeTurns(
 
   const byId = new Map(speakers.map((s) => [s.id.toLowerCase(), s.id]));
   const byName = new Map(speakers.map((s) => [s.name.toLowerCase().trim(), s.id]));
+  const speakerNames = speakers.map((s) => s.name);
 
   for (let i = 0; i < rawTurns.length; i++) {
-    const t = rawTurns[i] as Record<string, unknown>;
-    if (!t || typeof t !== 'object') continue;
+    const item = rawTurns[i];
+    let text = '';
+    let rawSpeaker = '';
+    let delivery: Record<string, unknown> = {};
+    let sourceFactIds: string[] = [];
+    let estimatedSeconds: number | undefined;
 
-    const text = String(
-      t.text ?? t.content ?? t.line ?? t.dialogue ?? t.message ?? ''
-    ).trim();
+    if (typeof item === 'string') {
+      // Turn is a plain string like "Piseth: Hello there"
+      const parsed = parseStringTurn(item, speakerNames);
+      if (!parsed) continue;
+      text = parsed.text;
+      rawSpeaker = (parsed.speaker ?? '').toLowerCase().trim();
+    } else if (item && typeof item === 'object') {
+      const t = item as Record<string, unknown>;
+      text = String(
+        t.text ?? t.content ?? t.line ?? t.dialogue ?? t.message ?? t.utterance ?? ''
+      ).trim();
+      rawSpeaker = String(
+        t.speaker_id ?? t.speakerId ?? t.speaker ?? t.name ?? t.role ?? t.character ?? ''
+      ).toLowerCase().trim();
+      delivery = (t.delivery as Record<string, unknown> | undefined) || {};
+      sourceFactIds = Array.isArray(t.source_fact_ids) ? (t.source_fact_ids as string[]) : [];
+      estimatedSeconds = typeof t.estimated_seconds === 'number' ? t.estimated_seconds : undefined;
+
+      // If text still contains "Speaker: ..." and no speaker found, parse it
+      if (text && !rawSpeaker) {
+        const parsed = parseStringTurn(text, speakerNames);
+        if (parsed?.speaker) {
+          rawSpeaker = parsed.speaker.toLowerCase().trim();
+          text = parsed.text;
+        }
+      }
+    } else {
+      continue;
+    }
+
     if (!text) continue;
-
-    const rawSpeaker = String(
-      t.speaker_id ?? t.speakerId ?? t.speaker ?? t.name ?? t.role ?? ''
-    ).toLowerCase().trim();
 
     let speakerId: string | undefined = byId.get(rawSpeaker) || byName.get(rawSpeaker);
 
@@ -153,7 +231,6 @@ export function normalizeTurns(
       speakerId = speakers[i % speakers.length]!.id;
     }
 
-    const delivery = (t.delivery as Record<string, unknown> | undefined) || {};
     result.push({
       speakerId,
       text,
@@ -162,9 +239,8 @@ export function normalizeTurns(
         pace: String(delivery.pace ?? 'normal'),
         pause_after_ms: Number(delivery.pause_after_ms ?? 300),
       },
-      sourceFactIds: Array.isArray(t.source_fact_ids) ? (t.source_fact_ids as string[]) : [],
-      estimatedSeconds:
-        typeof t.estimated_seconds === 'number' ? t.estimated_seconds : estimateSeconds(text),
+      sourceFactIds,
+      estimatedSeconds: estimatedSeconds ?? estimateSeconds(text),
     });
   }
 
