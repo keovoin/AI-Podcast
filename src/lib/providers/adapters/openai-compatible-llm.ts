@@ -81,18 +81,38 @@ export class OpenAICompatibleLLMAdapter implements LLMAdapter {
 
   async healthCheck(config: AdapterConfig): Promise<HealthCheckResult> {
     const start = Date.now();
-    const url = `${config.baseUrl}${config.endpointPath || '/v1/models'}`;
+    // Try /v1/models first (standard OpenAI health check)
+    // If endpointPath is set to /v1/chat/completions, don't use it for health check
+    const healthUrl = config.endpointPath?.includes('chat/completions')
+      ? `${config.baseUrl}/v1/models`
+      : `${config.baseUrl}${config.endpointPath || '/v1/models'}`;
     const headers = this.buildHeaders(config);
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(url, {
+      // First try GET /v1/models
+      let response = await fetch(healthUrl, {
         method: 'GET',
         headers,
         signal: controller.signal,
       });
+
+      // If /v1/models fails (404 or 405), try a minimal chat completion
+      if (!response.ok && (response.status === 404 || response.status === 405 || response.status === 401)) {
+        const chatUrl = `${config.baseUrl}${config.endpointPath || '/v1/chat/completions'}`;
+        response = await fetch(chatUrl, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: config.model || 'test',
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 1,
+          }),
+          signal: controller.signal,
+        });
+      }
 
       clearTimeout(timeout);
       const latencyMs = Date.now() - start;

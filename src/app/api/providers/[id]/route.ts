@@ -6,7 +6,6 @@ import { validateUrl } from '@/lib/ssrf';
 
 /**
  * GET /api/providers/:id
- * Get a single provider configuration.
  */
 export async function GET(
   _request: NextRequest,
@@ -65,13 +64,15 @@ export async function GET(
     });
   } catch (error) {
     console.error('GET /api/providers/:id error:', error);
-    return NextResponse.json({ error: 'Failed to fetch provider' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch provider', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }
 
 /**
  * PATCH /api/providers/:id
- * Update a provider configuration.
  */
 export async function PATCH(
   request: NextRequest,
@@ -102,7 +103,7 @@ export async function PATCH(
     // Verify ownership
     const existing = await prisma.provider.findFirst({ where: { id, userId } });
     if (!existing) {
-      return NextResponse.json({ error: 'Provider not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Provider not found. Check that database tables and seed data exist.' }, { status: 404 });
     }
 
     // SSRF check if URL is being updated
@@ -110,46 +111,57 @@ export async function PATCH(
       const ssrfResult = await validateUrl(data.baseUrl);
       if (!ssrfResult.safe) {
         return NextResponse.json(
-          { error: `URL validation failed: ${ssrfResult.reason}` },
+          { error: `URL blocked: ${ssrfResult.reason}` },
           { status: 400 }
         );
       }
     }
 
-    // Update provider
+    // Separate apiKey from update data
     const { apiKey, ...providerData } = data;
+
+    // Build prisma update payload, removing undefined values
+    const updatePayload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(providerData)) {
+      if (value !== undefined) {
+        updatePayload[key] = value;
+      }
+    }
+
+    // Update provider record
     const updated = await prisma.provider.update({
       where: { id },
-      data: {
-        ...providerData,
-        customHeaders: providerData.customHeaders ?? undefined,
-        costMetadata: providerData.costMetadata ?? undefined,
-        requestTemplate: providerData.requestTemplate ?? undefined,
-        voiceIds: providerData.voiceIds ?? undefined,
-      },
+      data: updatePayload,
     });
 
     // Update API key if provided
     if (apiKey) {
-      const encrypted = encryptApiKey(apiKey);
-      await prisma.providerSecret.upsert({
-        where: { providerId: id },
-        create: {
-          providerId: id,
-          encryptedKey: encrypted.encryptedKey,
-          iv: encrypted.iv,
-          authTag: encrypted.authTag,
-        },
-        update: {
-          encryptedKey: encrypted.encryptedKey,
-          iv: encrypted.iv,
-          authTag: encrypted.authTag,
-        },
-      });
+      try {
+        const encrypted = encryptApiKey(apiKey);
+        await prisma.providerSecret.upsert({
+          where: { providerId: id },
+          create: {
+            providerId: id,
+            encryptedKey: encrypted.encryptedKey,
+            iv: encrypted.iv,
+            authTag: encrypted.authTag,
+          },
+          update: {
+            encryptedKey: encrypted.encryptedKey,
+            iv: encrypted.iv,
+            authTag: encrypted.authTag,
+          },
+        });
+      } catch (encError) {
+        return NextResponse.json(
+          { error: 'Failed to encrypt API key. Check ENCRYPTION_MASTER_KEY env var.', details: encError instanceof Error ? encError.message : String(encError) },
+          { status: 500 }
+        );
+      }
     }
 
-    // Audit log
-    await prisma.auditLog.create({
+    // Audit log (non-blocking)
+    prisma.auditLog.create({
       data: {
         userId,
         action: 'provider.update',
@@ -157,24 +169,24 @@ export async function PATCH(
         resourceId: id,
         metadata: { updatedFields: Object.keys(data) },
       },
-    });
+    }).catch(() => {}); // Don't fail the request if audit log fails
 
     return NextResponse.json({
       id: updated.id,
       name: updated.name,
-      hasApiKey: !!(apiKey || (await prisma.providerSecret.findUnique({ where: { providerId: id } }))),
-      maskedApiKey: apiKey ? maskApiKey(apiKey) : undefined,
       updatedAt: updated.updatedAt.toISOString(),
     });
   } catch (error) {
     console.error('PATCH /api/providers/:id error:', error);
-    return NextResponse.json({ error: 'Failed to update provider' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to update provider', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }
 
 /**
  * DELETE /api/providers/:id
- * Delete a provider and its associated secrets.
  */
 export async function DELETE(
   _request: NextRequest,
@@ -189,11 +201,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Provider not found' }, { status: 404 });
     }
 
-    // Delete cascades handle secrets, health, capabilities, benchmarks
     await prisma.provider.delete({ where: { id } });
 
-    // Audit log
-    await prisma.auditLog.create({
+    prisma.auditLog.create({
       data: {
         userId,
         action: 'provider.delete',
@@ -201,11 +211,14 @@ export async function DELETE(
         resourceId: id,
         metadata: { name: existing.name },
       },
-    });
+    }).catch(() => {});
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('DELETE /api/providers/:id error:', error);
-    return NextResponse.json({ error: 'Failed to delete provider' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to delete provider', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }
