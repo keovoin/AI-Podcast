@@ -110,13 +110,40 @@ export async function POST(
       );
     }
 
-    // Ensure structure
-    if (!outline.segments || !Array.isArray(outline.segments)) {
+    // Extract segments from various possible shapes
+    if (Array.isArray(outline)) {
+      outline = { segments: outline };
+    } else if (outline && typeof outline === 'object') {
+      const o = outline as Record<string, unknown>;
+      const segs = o.segments ?? o.outline ?? o.sections ?? o.chapters;
+      if (Array.isArray(segs)) {
+        outline = { segments: segs };
+      } else {
+        // Fallback: first array-valued property
+        const firstArray = Object.values(o).find((v) => Array.isArray(v) && v.length > 0);
+        if (Array.isArray(firstArray)) outline = { segments: firstArray };
+      }
+    }
+
+    if (!outline.segments || !Array.isArray(outline.segments) || outline.segments.length === 0) {
       return NextResponse.json(
-        { error: 'LLM output missing segments array.' },
+        { error: 'LLM output missing segments array. Raw (first 500 chars): ' + response.text.slice(0, 500) },
         { status: 500 }
       );
     }
+
+    // Normalize each segment to the expected shape
+    const validSpeakerIds = project.speakers.map((ps) => ps.speaker.id);
+    outline.segments = outline.segments.map((seg: Record<string, unknown>, i: number) => ({
+      id: String(seg.id ?? `seg_${i + 1}`),
+      title: String(seg.title ?? seg.name ?? `Segment ${i + 1}`),
+      duration_seconds: Number(seg.duration_seconds ?? seg.duration ?? 60),
+      lead_speaker_id: validSpeakerIds.includes(String(seg.lead_speaker_id))
+        ? String(seg.lead_speaker_id)
+        : validSpeakerIds[i % validSpeakerIds.length] || validSpeakerIds[0] || '',
+      questions: Array.isArray(seg.questions) ? seg.questions : [],
+      locked: false,
+    }));
 
     // Calculate total duration
     const totalDuration = outline.segments.reduce(

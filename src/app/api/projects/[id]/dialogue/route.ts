@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getLLMAdapter } from '@/lib/providers/registry';
 import { decryptApiKey } from '@/lib/crypto';
 import { RoutingEngine } from '@/lib/routing/engine';
+import { extractTurns, normalizeTurns, estimateSeconds } from '@/lib/parsing/llm-output';
 import type { RoutableProvider } from '@/lib/routing/engine';
 import type { AdapterConfig } from '@/lib/providers/adapters/base';
 import type { AdapterType, HealthStatus } from '@/types/provider';
@@ -80,58 +81,42 @@ export async function POST(
       );
     }
 
-    // Parse dialogue
-    let dialogue;
+    // Parse dialogue (robust extraction that handles various LLM output shapes)
+    let rawTurns: unknown[];
     try {
-      // Clean up LLM response - strip markdown code fences and extra text
-      let jsonText = response.text.trim();
-      
-      // Remove markdown code fences
-      const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (codeBlockMatch) {
-        jsonText = codeBlockMatch[1]!.trim();
-      }
-      
-      // Try to find JSON object if response has extra text
-      if (!jsonText.startsWith('{') && !jsonText.startsWith('[')) {
-        const jsonStart = jsonText.indexOf('{');
-        if (jsonStart !== -1) {
-          jsonText = jsonText.slice(jsonStart);
-          let depth = 0;
-          for (let i = 0; i < jsonText.length; i++) {
-            if (jsonText[i] === '{') depth++;
-            if (jsonText[i] === '}') depth--;
-            if (depth === 0) {
-              jsonText = jsonText.slice(0, i + 1);
-              break;
-            }
-          }
-        }
-      }
-      
-      dialogue = JSON.parse(jsonText);
-    } catch {
+      rawTurns = extractTurns(response.text);
+    } catch (parseError) {
       return NextResponse.json(
-        { error: 'LLM returned invalid JSON for dialogue. Raw (first 500 chars): ' + response.text.slice(0, 500) },
+        {
+          error:
+            'Could not parse dialogue from LLM response. Raw (first 800 chars): ' +
+            response.text.slice(0, 800),
+        },
         { status: 500 }
       );
     }
 
-    if (!dialogue.turns || !Array.isArray(dialogue.turns) || dialogue.turns.length < 2) {
+    if (rawTurns.length < 2) {
       return NextResponse.json(
-        { error: 'Dialogue must contain at least 2 turns.' },
+        {
+          error:
+            `LLM returned ${rawTurns.length} turn(s); at least 2 are required. ` +
+            `The provider may not follow the JSON format. Raw (first 500 chars): ` +
+            response.text.slice(0, 500),
+        },
         { status: 500 }
       );
     }
 
-    // Validate speaker IDs exist
-    const validSpeakerIds = new Set(project.speakers.map((ps) => ps.speaker.id));
-    const invalidTurns = dialogue.turns.filter(
-      (t: { speaker_id: string }) => !validSpeakerIds.has(t.speaker_id)
-    );
-    if (invalidTurns.length > 0) {
+    // Normalize turns and map speaker IDs to valid project speaker IDs.
+    // Real LLMs often use names ("Piseth"), positional ids ("speaker_1"),
+    // or the actual CUID. We map all of these to valid speaker IDs.
+    const projectSpeakers = project.speakers.map((ps) => ps.speaker);
+    const normalized = normalizeTurns(rawTurns, projectSpeakers);
+
+    if (normalized.length < 2) {
       return NextResponse.json(
-        { error: `Invalid speaker_id in turns: ${invalidTurns.map((t: { id: string }) => t.id).join(', ')}` },
+        { error: 'Could not extract valid turns with speaker and text.' },
         { status: 500 }
       );
     }
@@ -139,21 +124,14 @@ export async function POST(
     // Delete existing turns and save new ones
     await prisma.dialogueTurn.deleteMany({ where: { projectId: id } });
 
-    const turnRecords = dialogue.turns.map((turn: {
-      id: string;
-      speaker_id: string;
-      text: string;
-      delivery?: { emotion?: string; pace?: string; pause_after_ms?: number };
-      source_fact_ids?: string[];
-      estimated_seconds?: number;
-    }, index: number) => ({
+    const turnRecords = normalized.map((turn, index) => ({
       projectId: id,
       turnIndex: index,
-      speakerId: turn.speaker_id,
+      speakerId: turn.speakerId,
       text: turn.text,
-      delivery: turn.delivery || { emotion: 'neutral', pace: 'normal', pause_after_ms: 300 },
-      sourceFactIds: turn.source_fact_ids || [],
-      estimatedSeconds: turn.estimated_seconds || estimateSeconds(turn.text),
+      delivery: turn.delivery,
+      sourceFactIds: turn.sourceFactIds,
+      estimatedSeconds: turn.estimatedSeconds,
     }));
 
     await prisma.dialogueTurn.createMany({ data: turnRecords });
@@ -372,12 +350,6 @@ ${JSON.stringify(project.outline?.segments, null, 2)}
 ${facts.length > 0 ? `Available Facts (reference by ID in source_fact_ids):\n${facts.map((f) => `- [${f.id}] ${f.content}`).join('\n')}\n\nIMPORTANT: Only reference fact IDs for claims. Uncertain statements must NOT have fact IDs.` : 'No approved facts available. All statements should be presented as opinions or general knowledge.'}
 
 Generate engaging, natural dialogue following the outline structure. Use speaker IDs exactly as shown above.`;
-}
-
-function estimateSeconds(text: string): number {
-  // ~150 words per minute, ~5 chars per word
-  const wordCount = text.length / 5;
-  return Math.round((wordCount / 150) * 60 * 10) / 10;
 }
 
 // Reuse the resolveLLMProvider pattern from outline route
