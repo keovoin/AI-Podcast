@@ -12,6 +12,8 @@
  * - Actual timestamp calculation from real clip durations
  */
 
+import { createHash } from 'crypto';
+
 export interface AudioClipInput {
   turnIndex: number;
   speakerId: string;
@@ -133,7 +135,6 @@ export function generateClipCacheKey(
   pace?: string,
   emotion?: string
 ): string {
-  const crypto = require('crypto');
   const input = JSON.stringify({ providerId, voiceId, text, pace, emotion });
-  return crypto.createHash('sha256').update(input).digest('hex');
+  return createHash('sha256').update(input).digest('hex');
 }

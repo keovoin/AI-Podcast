@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { speakerCreateSchema } from '@/lib/validation/schemas';
 import { z } from 'zod';
 
 const addSpeakerSchema = z.object({
