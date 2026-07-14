@@ -38,7 +38,7 @@ export async function POST(
         speakers: { include: { speaker: true } },
         sources: { include: { facts: true } },
         outline: true,
-        turns: { orderBy: { turnIndex: 'asc' }, include: { clip: true } },
+        turns: { orderBy: { turnIndex: 'asc' } },
         clips: true,
       },
     });
@@ -57,196 +57,64 @@ export async function POST(
       speakerNames[ps.speaker.id] = ps.speaker.name;
     }
 
-    // Get audio clips and compose
-    let composedAudio: Buffer | undefined;
-    let timestamps: Array<{ turnIndex: number; startMs: number; endMs: number; speakerId: string; durationMs: number }> = [];
+    // Always generate fresh audio for export (ensures all turns have audio)
+    const clips: AudioClipInput[] = [];
     let ttsProviderUsed = { name: 'Mock TTS', voiceIds: Object.values(speakerNames) };
 
-    // Check if all clips exist
-    const allClipsExist = project.clips.length > 0 && project.clips.length >= project.turns.length;
+    // Resolve TTS provider
+    const ttsResolved = await resolveTTSProvider(userId, project.lockedTtsId, project.routingMode);
+    
+    let adapter: any;
+    let config: AdapterConfig;
+    let providerId = 'mock';
 
-    if (allClipsExist) {
-      // Use existing clips (previously generated via /api/projects/:id/audio)
-      timestamps = project.clips
-        .sort((a, b) => {
-          const turnA = project.turns.find((t) => t.id === a.turnId);
-          const turnB = project.turns.find((t) => t.id === b.turnId);
-          return (turnA?.turnIndex || 0) - (turnB?.turnIndex || 0);
-        })
-        .map((clip) => {
-          const turn = project.turns.find((t) => t.id === clip.turnId);
-          return {
-            turnIndex: turn?.turnIndex || 0,
-            startMs: clip.startTimeMs || 0,
-            endMs: (clip.startTimeMs || 0) + clip.durationMs,
-            speakerId: turn?.speakerId || '',
-            durationMs: clip.durationMs,
-          };
-        });
+    if (ttsResolved) {
+      adapter = getTTSAdapter(ttsResolved.adapterType as AdapterType);
+      config = ttsResolved.config;
+      providerId = ttsResolved.providerId;
+      ttsProviderUsed = { name: ttsResolved.adapterType, voiceIds: ttsResolved.voiceIds || Object.values(speakerNames) };
     } else {
-      // Generate audio on-the-fly using either real TTS provider or mock for preview
-      let adapter: any;
-      let config: AdapterConfig;
-      let providerId = 'mock';
-      let providerName = 'Mock TTS';
-
-      // Try to resolve real TTS provider
-      const ttsResolved = await resolveTTSProvider(userId, project.lockedTtsId, project.routingMode);
-      if (ttsResolved) {
-        adapter = getTTSAdapter(ttsResolved.adapterType as AdapterType);
-        config = ttsResolved.config;
-        providerId = ttsResolved.providerId;
-        providerName = ttsResolved.adapterType;
-        ttsProviderUsed = { name: providerName, voiceIds: ttsResolved.voiceIds || Object.values(speakerNames) };
-      } else {
-        // Fallback to mock adapter for preview
-        adapter = new MockTTSAdapter({ latencyMs: 1 });
-        config = { baseUrl: '', apiKey: '', authType: 'NONE', timeoutMs: 30000 };
-      }
-
-      // Build speaker -> voice mapping
-      const speakerVoiceMap = buildSpeakerVoiceMap(project.speakers, ttsResolved?.voiceIds);
-
-      const clips: AudioClipInput[] = [];
-
-      // Generate audio for each turn
-      for (const turn of project.turns) {
-        try {
-          const voiceId = speakerVoiceMap[turn.speakerId] || ttsResolved?.voiceIds?.[0] || 'mock-km-male-1';
-          const delivery = turn.delivery as { emotion?: string; pace?: string; pause_after_ms?: number } | null;
-
-          // Normalize text for TTS (if using real provider)
-          let ttsText = turn.text;
-          if (project.language === 'km') {
-            const normalized = normalizeKhmerText(turn.text, project.language);
-            ttsText = normalized.normalized;
-          }
-
-          // Generate cache key
-          const cacheKey = generateClipCacheKey(
-            providerId,
-            voiceId,
-            ttsText,
-            delivery?.pace,
-            delivery?.emotion
-          );
-
-          // Synthesize
-          const response = await adapter.synthesize(
-            {
-              text: ttsText,
-              voiceId,
-              language: project.language,
-              emotion: delivery?.emotion,
-              pace: (delivery?.pace as 'slow' | 'normal' | 'fast' | undefined) || 'normal',
-              outputFormat: 'wav',
-            },
-            config
-          );
-
-          // Save clip record to DB
-          await prisma.audioClip.upsert({
-            where: { turnId: turn.id },
-            create: {
-              projectId: id,
-              turnId: turn.id,
-              providerId,
-              voiceId,
-              textHash: cacheKey,
-              s3Key: `projects/${id}/clips/${turn.turnIndex}.wav`,
-              durationMs: response.durationMs,
-              format: 'wav',
-              sizeBytes: response.audio.length,
-              cached: false,
-            },
-            update: {
-              providerId,
-              voiceId,
-              textHash: cacheKey,
-              durationMs: response.durationMs,
-              sizeBytes: response.audio.length,
-            },
-          });
-
-          clips.push({
-            turnIndex: turn.turnIndex,
-            speakerId: turn.speakerId,
-            audio: response.audio,
-            durationMs: response.durationMs,
-            pauseAfterMs: delivery?.pause_after_ms || 300,
-          });
-        } catch (turnError) {
-          console.error(`Failed to generate audio for turn ${turn.turnIndex}:`, turnError);
-          // Continue with remaining turns - don't fail the whole export
-        }
-      }
-
-      if (clips.length === 0) {
-        return NextResponse.json(
-          { error: 'Failed to generate audio for any turns. Check TTS provider configuration.' },
-          { status: 500 }
-        );
-      }
-
-      // Compose all clips into final audio
-      const composed = composeAudioClips(clips);
-      composedAudio = composed.audio;
-      timestamps = composed.timestamps;
-
-      // Update clip records with timestamps
-      for (const ts of timestamps) {
-        const turn = project.turns.find((t) => t.turnIndex === ts.turnIndex);
-        if (turn) {
-          await prisma.audioClip.updateMany({
-            where: { turnId: turn.id },
-            data: { startTimeMs: ts.startMs },
-          });
-        }
-      }
+      // Fallback to mock adapter
+      adapter = new MockTTSAdapter({ latencyMs: 1 });
+      config = { baseUrl: '', apiKey: '', authType: 'NONE', timeoutMs: 30000 };
     }
 
-    // Compose if we have clips but no composed audio
-    if (!composedAudio && project.clips.length > 0) {
-      const clipAudios: AudioClipInput[] = project.clips
-        .sort((a, b) => {
-          const turnA = project.turns.find((t) => t.id === a.turnId);
-          const turnB = project.turns.find((t) => t.id === b.turnId);
-          return (turnA?.turnIndex || 0) - (turnB?.turnIndex || 0);
-        })
-        .map((clip) => {
-          const turn = project.turns.find((t) => t.id === clip.turnId);
-          return {
-            turnIndex: turn?.turnIndex || 0,
-            speakerId: turn?.speakerId || '',
-            audio: Buffer.alloc(0), // Placeholder - in production would fetch from S3
-            durationMs: clip.durationMs,
-            pauseAfterMs: 300,
-          };
-        });
+    // Build speaker -> voice mapping
+    const speakerVoiceMap = buildSpeakerVoiceMap(project.speakers, ttsResolved?.voiceIds);
 
-      if (clipAudios.length > 0) {
-        const composed = composeAudioClips(clipAudios);
-        composedAudio = composed.audio;
-      }
-    }
+    // Generate audio for each turn
+    console.log(`[Export] Generating audio for ${project.turns.length} turns...`);
+    
+    for (const turn of project.turns) {
+      try {
+        const voiceId = speakerVoiceMap[turn.speakerId] || ttsResolved?.voiceIds?.[0] || 'mock-km-male-1';
+        const delivery = turn.delivery as { emotion?: string; pace?: string; pause_after_ms?: number } | null;
 
-    // Fallback: generate using mock adapter if still no audio
-    if (!composedAudio) {
-      const mockAdapter = new MockTTSAdapter({ latencyMs: 1 });
-      const mockConfig = { baseUrl: '', apiKey: '', authType: 'NONE', timeoutMs: 30000 };
-      const clips: AudioClipInput[] = [];
+        // Normalize text for TTS (if Khmer)
+        let ttsText = turn.text;
+        if (project.language === 'km') {
+          const normalized = normalizeKhmerText(turn.text, project.language);
+          ttsText = normalized.normalized;
+        }
 
-      for (const turn of project.turns) {
-        const delivery = turn.delivery as { pause_after_ms?: number; pace?: string } | null;
-        const response = await mockAdapter.synthesize(
+        console.log(`[Export] Turn ${turn.turnIndex}: "${ttsText.substring(0, 40)}..." (emotion: ${delivery?.emotion || 'neutral'})`);
+
+        // Synthesize audio
+        const response = await adapter.synthesize(
           {
-            text: turn.text,
-            voiceId: 'mock-km-male-1',
+            text: ttsText,
+            voiceId,
             language: project.language,
+            emotion: delivery?.emotion,
             pace: (delivery?.pace as 'slow' | 'normal' | 'fast' | undefined) || 'normal',
+            outputFormat: 'wav',
           },
-          mockConfig
+          config
         );
+
+        console.log(`[Export] Turn ${turn.turnIndex}: Generated ${response.durationMs}ms audio (${response.audio.length} bytes)`);
+
+        // Add to clips array
         clips.push({
           turnIndex: turn.turnIndex,
           speakerId: turn.speakerId,
@@ -254,11 +122,59 @@ export async function POST(
           durationMs: response.durationMs,
           pauseAfterMs: delivery?.pause_after_ms || 300,
         });
-      }
 
-      const composed = composeAudioClips(clips);
-      composedAudio = composed.audio;
-      timestamps = composed.timestamps;
+      } catch (turnError) {
+        console.error(`[Export] Failed to generate audio for turn ${turn.turnIndex}:`, turnError);
+        // Continue with remaining turns
+      }
+    }
+
+    if (clips.length === 0) {
+      return NextResponse.json(
+        { error: 'Failed to generate audio for any turns.' },
+        { status: 500 }
+      );
+    }
+
+    console.log(`[Export] Composing ${clips.length} clips into final audio...`);
+
+    // Compose all clips into single audio file
+    const composed = composeAudioClips(clips);
+    
+    console.log(`[Export] Final audio: ${composed.audio.length} bytes, ${composed.totalDurationMs}ms duration`);
+
+    // Save audio clips to database
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i]!;
+      const cacheKey = generateClipCacheKey(
+        providerId,
+        speakerVoiceMap[clip.speakerId],
+        project.turns[i]!.text,
+        (project.turns[i]!.delivery as any)?.pace,
+        (project.turns[i]!.delivery as any)?.emotion
+      );
+
+      await prisma.audioClip.upsert({
+        where: { turnId: project.turns[i]!.id },
+        create: {
+          projectId: id,
+          turnId: project.turns[i]!.id,
+          providerId,
+          voiceId: speakerVoiceMap[clip.speakerId],
+          textHash: cacheKey,
+          s3Key: `projects/${id}/clips/${i}.wav`,
+          durationMs: clip.durationMs,
+          format: 'wav',
+          sizeBytes: clip.audio.length,
+          cached: false,
+          startTimeMs: composed.timestamps[i]?.startMs || 0,
+        },
+        update: {
+          durationMs: clip.durationMs,
+          sizeBytes: clip.audio.length,
+          startTimeMs: composed.timestamps[i]?.startMs || 0,
+        },
+      });
     }
 
     // Generate transcript
@@ -268,7 +184,7 @@ export async function POST(
         speakerId: t.speakerId,
         text: t.text,
       })),
-      timestamps,
+      composed.timestamps,
       speakerNames
     );
 
@@ -278,7 +194,7 @@ export async function POST(
 
     const showNotes = generateShowNotes(
       segments,
-      timestamps,
+      composed.timestamps,
       project.turns.map((t) => ({
         turnIndex: t.turnIndex,
         text: t.text,
@@ -323,9 +239,8 @@ export async function POST(
     });
 
     // Build manifest
-    const totalDurationMs = timestamps.length > 0
-      ? timestamps[timestamps.length - 1]!.endMs
-      : project.turns.reduce((sum, t) => sum + (t.estimatedSeconds || 5) * 1000, 0);
+    const totalDurationMs = composed.totalDurationMs || 
+      project.turns.reduce((sum, t) => sum + (t.estimatedSeconds || 5) * 1000, 0);
 
     const manifest: ExportManifest = {
       version: '1.0.0',
@@ -357,14 +272,17 @@ export async function POST(
     };
 
     // Build ZIP
+    console.log(`[Export] Building ZIP package...`);
     const exportResult = buildExportZip({
       title: project.title,
       language: project.language,
-      audio: composedAudio || Buffer.alloc(0),
+      audio: composed.audio,
       transcript,
       showNotes,
       manifest,
     });
+
+    console.log(`[Export] ZIP created: ${exportResult.zipBuffer.length} bytes`);
 
     // Record export
     await prisma.exportPackage.create({
@@ -383,6 +301,8 @@ export async function POST(
       where: { id },
       data: { status: 'EXPORTED' },
     });
+
+    console.log(`[Export] Complete! ZIP: ${exportResult.zipBuffer.length} bytes`);
 
     // Return ZIP as download
     return new NextResponse(exportResult.zipBuffer, {
