@@ -84,14 +84,21 @@ export class MockLLMAdapter implements LLMAdapter {
   }
 
   private generateMockResponse(request: LLMRequest): string {
-    // Check for outline request first (even with JSON format)
-    if (request.prompt.toLowerCase().includes('outline')) {
-      return this.generateMockOutline(request.prompt);
+    // Priority 1: Check if this is a dialogue request (via system prompt or explicit indicators)
+    const isDialogueRequest =
+      request.systemPrompt?.toLowerCase().includes('podcast script') ||
+      request.systemPrompt?.toLowerCase().includes('dialogue') ||
+      (request.prompt.toLowerCase().includes('dialogue') && !request.prompt.toLowerCase().includes('outline'));
+
+    // Priority 2: Check if this is an outline request
+    const isOutlineRequest = request.prompt.toLowerCase().includes('outline') && !isDialogueRequest;
+
+    if (isDialogueRequest || (request.responseFormat === 'json' && !isOutlineRequest)) {
+      return this.generateMockDialogue(request.prompt);
     }
 
-    // If JSON format requested, generate structured dialogue
-    if (request.responseFormat === 'json') {
-      return this.generateMockDialogue(request.prompt);
+    if (isOutlineRequest) {
+      return this.generateMockOutline(request.prompt);
     }
 
     return this.generateMockText(request.prompt);
