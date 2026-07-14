@@ -8,9 +8,9 @@ import type {
 } from './base';
 
 /**
- * Mock TTS adapter for testing.
- * Generates synthetic audio buffers without requiring external API keys.
- * Produces a valid WAV header with silence for duration testing.
+ * Mock TTS adapter for testing and development.
+ * Generates synthetic audio buffers with actual tone content (not just silence).
+ * Produces valid WAV files with audible sine wave tones for duration testing.
  */
 export class MockTTSAdapter implements TTSAdapter {
   readonly type = 'MOCK';
@@ -44,8 +44,8 @@ export class MockTTSAdapter implements TTSAdapter {
     const paceMultiplier = request.pace === 'slow' ? 1.3 : request.pace === 'fast' ? 0.8 : 1.0;
     const adjustedDurationMs = Math.round(durationMs * paceMultiplier);
 
-    // Generate a minimal valid WAV file with silence
-    const audio = this.generateSilentWav(adjustedDurationMs);
+    // Generate a WAV file with actual audio tone content (not just silence)
+    const audio = this.generateToneWav(adjustedDurationMs, request.emotion || 'neutral');
     const latency = Date.now() - start;
 
     return {
@@ -106,10 +106,11 @@ export class MockTTSAdapter implements TTSAdapter {
   }
 
   /**
-   * Generate a valid WAV file with silence for the given duration.
+   * Generate a WAV file with actual audio tone content (sine wave).
    * 16-bit PCM, 22050 Hz, mono.
+   * Frequency varies by emotion to simulate voice characteristics.
    */
-  private generateSilentWav(durationMs: number): Buffer {
+  private generateToneWav(durationMs: number, emotion?: string): Buffer {
     const sampleRate = 22050;
     const bitsPerSample = 16;
     const numChannels = 1;
@@ -139,7 +140,64 @@ export class MockTTSAdapter implements TTSAdapter {
     buffer.write('data', 36);
     buffer.writeUInt32LE(dataSize, 40);
 
-    // Audio data is already zero-filled (silence)
+    // Generate sine wave tone with frequency based on emotion
+    // This creates audible content for testing
+    let frequency = 440; // Default A4 note (neutral)
+    switch (emotion?.toLowerCase()) {
+      case 'friendly':
+      case 'enthusiastic':
+      case 'happy':
+        frequency = 523; // C5 - higher, brighter
+        break;
+      case 'sad':
+      case 'concerned':
+        frequency = 330; // E4 - lower, darker
+        break;
+      case 'confident':
+        frequency = 440; // A4 - standard
+        break;
+      case 'curious':
+        frequency = 494; // B4 - medium-high
+        break;
+      case 'thoughtful':
+        frequency = 392; // G4 - medium
+        break;
+      case 'interested':
+        frequency = 466; // A#4 - slightly above neutral
+        break;
+      default:
+        frequency = 440; // A4 neutral
+    }
+
+    // Generate audio samples (sine wave)
+    let bufferIndex = 44; // Start after WAV header
+    const amplitude = 20000; // Volume level (16-bit range is -32768 to 32767)
+
+    for (let i = 0; i < numSamples; i++) {
+      // Calculate sine wave value
+      const angle = (2 * Math.PI * frequency * i) / sampleRate;
+      const sample = Math.sin(angle) * amplitude;
+
+      // Fade in/out to reduce clicks
+      let envelope = 1.0;
+      const fadeDuration = Math.min(500, durationMs / 10); // 500ms or 10% fade
+      const fadeSamples = Math.round((fadeDuration / 1000) * sampleRate);
+
+      if (i < fadeSamples) {
+        // Fade in
+        envelope = i / fadeSamples;
+      } else if (i > numSamples - fadeSamples) {
+        // Fade out
+        envelope = (numSamples - i) / fadeSamples;
+      }
+
+      const finalSample = Math.round(sample * envelope);
+
+      // Write 16-bit signed integer (little-endian)
+      buffer.writeInt16LE(finalSample, bufferIndex);
+      bufferIndex += 2;
+    }
+
     return buffer;
   }
 }
