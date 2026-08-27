@@ -77,8 +77,8 @@ describe('Encryption', () => {
   describe('maskApiKey', () => {
     it('should mask a long key showing first 4 and last 4 characters', () => {
       const result = maskApiKey('sk-1234567890abcdef');
-      // 18 chars -> 4 shown + 10 masked + 4 shown
-      expect(result).toBe('sk-1**********cdef');
+      // 19 chars -> 4 shown + 11 masked + 4 shown
+      expect(result).toBe('sk-1***********cdef');
       expect(result).not.toContain('567890');
     });
 
@@ -104,8 +104,8 @@ describe('Encryption', () => {
       const encrypted = encryptApiKey(plaintext);
       const masked = getMaskedKey(encrypted);
 
-      // 18 chars -> 4 shown + 10 masked + 4 shown
-      expect(masked).toBe('sk-1**********cdef');
+      // 19 chars -> 4 shown + 11 masked + 4 shown
+      expect(masked).toBe('sk-1***********cdef');
       expect(masked).not.toContain('567890');
     });
   });

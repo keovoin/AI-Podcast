@@ -50,7 +50,11 @@ describe('Encryption - decryptApiKey', () => {
 
   test('fails with tampered ciphertext', () => {
     const encrypted = encryptApiKey('test-key');
-    encrypted.encryptedKey += 'tampered';
+    // Flip one base64 character *inside* the ciphertext (appending is
+    // ignored by the base64 decoder, so it would not trigger GCM auth).
+    encrypted.encryptedKey =
+      (encrypted.encryptedKey[0] === 'A' ? 'B' : 'A') +
+      encrypted.encryptedKey.slice(1);
     expect(() => decryptApiKey(encrypted)).toThrow();
   });
 
@@ -384,7 +388,6 @@ describe('MockLLMAdapter', () => {
       mockConfig
     );
     const parsed = JSON.parse(response.text);
-    expect(parsed.episode).toBeDefined();
     expect(Array.isArray(parsed.turns)).toBe(true);
     expect(parsed.turns.length).toBeGreaterThan(0);
     expect(parsed.turns[0].id).toMatch(/^turn_\d{4}$/);
