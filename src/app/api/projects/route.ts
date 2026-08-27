@@ -1,25 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 import { projectCreateSchema } from '@/lib/validation/schemas';
 
 /**
  * GET /api/projects
  * List all projects for the current user.
+ * - Default: returns the plain array (backward compatible with the existing UI).
+ * - With ?page=&limit=: returns { projects, pagination }.
  */
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
+    const { searchParams } = new URL(request.url);
+    const hasPagination = searchParams.has('page') || searchParams.has('limit');
 
-    const projects = await prisma.project.findMany({
-      where: { userId },
-      include: {
-        speakers: { include: { speaker: true } },
-        _count: { select: { turns: true, clips: true } },
+    if (!hasPagination) {
+      const projects = await prisma.project.findMany({
+        where: { userId },
+        include: {
+          speakers: { include: { speaker: true } },
+          _count: { select: { turns: true, clips: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      return NextResponse.json(projects);
+    }
+
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
+
+    const [projects, total] = await Promise.all([
+      prisma.project.findMany({
+        where: { userId },
+        include: {
+          speakers: { include: { speaker: true } },
+          _count: { select: { turns: true, clips: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.project.count({ where: { userId } }),
+    ]);
+
+    return NextResponse.json({
+      projects,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
       },
-      orderBy: { updatedAt: 'desc' },
     });
-
-    return NextResponse.json(projects);
   } catch (error) {
     console.error('GET /api/projects error:', error);
     return NextResponse.json({ error: 'Failed to fetch projects' }, { status: 500 });
@@ -43,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = validation.data;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
 
     const project = await prisma.project.create({
       data: {

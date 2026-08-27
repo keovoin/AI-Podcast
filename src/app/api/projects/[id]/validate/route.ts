@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 import { validateDialogue } from '@/lib/validation/dialogue-validator';
 import type { DialogueTurn, ValidationContext } from '@/lib/validation/dialogue-validator';
 
@@ -10,12 +11,12 @@ import type { DialogueTurn, ValidationContext } from '@/lib/validation/dialogue-
  * Returns structured issues and statistics.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
 
     const project = await prisma.project.findFirst({
       where: { id, userId },

@@ -10,7 +10,7 @@
     "postinstall": "prisma generate",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "build:worker": "tsc workers/index.ts --outDir dist --module commonjs --moduleResolution node --target es2022 --esModuleInterop --skipLibCheck --types node && mkdir -p dist/workers && mv dist/index.js dist/workers/index.js",
+    "build:worker": "node -e \"const e=require('esbuild'); e.buildSync({entryPoints:['workers/index.ts'],bundle:true,platform:'node',target:'node20',outfile:'dist/workers/index.js',external:['@prisma/client','prisma'],sourcemap:false,define:{'process.env.NODE_ENV':'\\\"production\\\"'}})\"" ,
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

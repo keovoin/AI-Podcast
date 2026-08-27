@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 import { generateTranscript } from '@/lib/export/transcript';
 import { generateShowNotes } from '@/lib/export/show-notes';
 import { buildExportZip } from '@/lib/export/zip-builder';
@@ -26,7 +27,7 @@ import { MockTTSAdapter } from '@/lib/providers/adapters/mock-tts';
  * - Manifest with AI disclosure
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

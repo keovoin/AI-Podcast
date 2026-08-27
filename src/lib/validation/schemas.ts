@@ -111,6 +111,26 @@ export const projectCreateSchema = z.object({
   routingMode: routingModeSchema.default('AUTO'),
 });
 
+/**
+ * Whitelist for PATCH /api/projects/:id — only these editable fields may be
+ * updated. Anything not listed here (userId, id, status, timestamps, storage
+ * keys, ...) is rejected, fixing the mass-assignment vulnerability.
+ */
+export const projectUpdateSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  topic: z.string().max(500).nullable().optional(),
+  objective: z.string().max(1000).nullable().optional(),
+  audience: z.string().max(200).nullable().optional(),
+  language: z.string().min(2).max(10).optional(),
+  targetDuration: z.number().int().min(30).max(7200).nullable().optional(),
+  style: z.string().max(200).nullable().optional(),
+  requiredPoints: z.array(z.string()).optional(),
+  excludedPoints: z.array(z.string()).optional(),
+  routingMode: routingModeSchema.optional(),
+  lockedLlmId: z.string().max(100).nullable().optional(),
+  lockedTtsId: z.string().max(100).nullable().optional(),
+});
+
 export const speakerCreateSchema = z.object({
   name: z.string().min(1).max(100),
   role: z.string().max(200).optional(),

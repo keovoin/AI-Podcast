@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 import { z } from 'zod';
 
 const addSpeakerSchema = z.object({
@@ -30,7 +31,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
     const body = await request.json();
     const validation = addSpeakerSchema.safeParse(body);
 

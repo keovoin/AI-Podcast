@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 import { getLLMAdapter } from '@/lib/providers/registry';
 import { decryptApiKey } from '@/lib/crypto';
 import { RoutingEngine } from '@/lib/routing/engine';
@@ -19,7 +20,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
     const body = await request.json().catch(() => ({}));
     const targetTurns: number | undefined =
       typeof body?.targetTurns === 'number' && body.targetTurns > 0
@@ -184,12 +185,12 @@ export async function POST(
  * Get current dialogue turns.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
 
     const project = await prisma.project.findFirst({ where: { id, userId } });
     if (!project) {
@@ -229,7 +230,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
     const body = await request.json();
 
     const project = await prisma.project.findFirst({ where: { id, userId } });
@@ -287,7 +288,7 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
     const body = await request.json();
 
     const project = await prisma.project.findFirst({

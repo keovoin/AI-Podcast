@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
 
 /**
  * GET /api/jobs/:id
  * Get job status with real progress based on completed turns.
  * Returns queued/running/retrying/completed/failed/cancelled state.
+ *
+ * SECURITY FIX: jobs are scoped through their project — a caller can only see
+ * a job if its project belongs to the authenticated user (fixes IDOR).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const userId = getRequestUserId(request);
 
-    const job = await prisma.generationJob.findUnique({
-      where: { id },
+    const job = await prisma.generationJob.findFirst({
+      where: {
+        id,
+        project: { userId },
+      },
     });
 
     if (!job) {
@@ -47,15 +55,23 @@ export async function GET(
 /**
  * DELETE /api/jobs/:id
  * Cancel a running/queued job.
+ *
+ * SECURITY FIX: ownership is enforced via the project relation (fixes IDOR).
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const userId = getRequestUserId(request);
 
-    const job = await prisma.generationJob.findUnique({ where: { id } });
+    const job = await prisma.generationJob.findFirst({
+      where: {
+        id,
+        project: { userId },
+      },
+    });
     if (!job) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
