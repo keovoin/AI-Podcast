@@ -202,6 +202,10 @@ model Project {
   lockedLlmId     String?        @map("locked_llm_id")
   lockedTtsId     String?        @map("locked_tts_id")
   status           ProjectStatus @default(DRAFT)
+  audioKey         String?       @map("audio_key")
+  audioUrl         String?       @map("audio_url")
+  thumbnailKey     String?       @map("thumbnail_key")
+  thumbnailUrl     String?       @map("thumbnail_url")
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
 
@@ -341,6 +345,7 @@ model AudioClip {
   voiceId      String   @map("voice_id")
   textHash     String   @map("text_hash")
   s3Key        String   @map("s3_key")
+  audioKey     String?  @map("audio_key")
   durationMs   Int      @map("duration_ms")
   startTimeMs  Int?     @map("start_time_ms")
   format       String   @default("mp3")

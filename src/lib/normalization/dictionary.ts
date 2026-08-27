@@ -25,7 +25,7 @@ export const KHMER_DICTIONARY: DictionaryEntry[] = [
 
   // === Technical Terms (Khmer-English) ===
   { written: 'AI', spoken: '\u17A2\u17C1 \u17A2\u17B6\u1799', category: 'technical', notes: 'Artificial Intelligence' },
-  { written: 'ML', spoken: '\u17A2\u17C2\u17C6 \u17A2\u17C2\u179B', category: 'technical', notes: 'Machine Learning' },
+  { written: 'ML', spoken: '\u17A2\u17C2\u1798 \u17A2\u17C2\u179B', category: 'technical', notes: 'Machine Learning (អែម អែល)' },
   { written: 'API', spoken: '\u17A2\u17C1 \u1797\u17B8 \u17A2\u17B6\u1799', category: 'technical' },
   { written: 'IT', spoken: '\u17A2\u17B6\u1799 \u1791\u17B8', category: 'technical' },
   { written: 'GPS', spoken: '\u1787\u17B8 \u1797\u17B8 \u17A2\u17C2\u179F', category: 'technical' },
@@ -36,6 +36,12 @@ export const KHMER_DICTIONARY: DictionaryEntry[] = [
   { written: 'blockchain', spoken: '\u1794\u17D2\u179B\u17BB\u1780\u1786\u17C1\u1793', category: 'technical' },
   { written: 'fintech', spoken: '\u17A0\u17D2\u179C\u17B7\u1793\u178F\u17C2\u1780', category: 'technical' },
   { written: 'data science', spoken: '\u178A\u17B6\u178F\u17B6 \u179F\u17B6\u1799\u17A2\u17C1\u1793', category: 'technical' },
+  { written: 'podcast', spoken: '\u1795\u17C9\u17C4\u178F\u1780\u17B6\u179F', category: 'technical', notes: 'Podcast' },
+  { written: 'startup', spoken: '\u179F\u17D2\u178F\u17B6\u178F\u17A2\u17B6\u1795', category: 'technical' },
+  { written: 'telegram', spoken: '\u178F\u17C2\u179B\u17C2\u1780\u17D2\u179A\u17B6\u1798', category: 'technical' },
+  { written: 'YouTube', spoken: '\u1799\u17C2\u178F\u17C2\u1794', category: 'technical', notes: 'YouTube' },
+  { written: 'Facebook', spoken: '\u179E\u17C1\u179F\u17D2\u1794\u17C1\u1780', category: 'technical', notes: 'Facebook' },
+  { written: 'Kiri', spoken: '\u1780\u17B8\u179A\u17B8', category: 'name', notes: 'Kiri TTS provider' },
 
   // === Cambodian Place Names ===
   { written: '\u1797\u17D2\u1793\u17C6\u1796\u17C1\u1789', spoken: '\u1797\u17D2\u1793\u17C6\u1796\u17C1\u1789', category: 'name', notes: 'Phnom Penh' },
@@ -64,14 +70,22 @@ export const KHMER_DICTIONARY: DictionaryEntry[] = [
 /**
  * Apply pronunciation dictionary to text.
  * Replaces written forms with spoken forms for TTS.
+ *
+ * IMPORTANT: uses a Khmer-safe word boundary (lookahead/lookbehind on
+ * non-Khmer/non-Latin characters). The old `\b` boundary is broken for
+ * Khmer script because Khmer letters are not word characters in JS regex,
+ * so `\b` matches between every Khmer glyph and no entry was ever applied.
  */
 export function applyDictionary(text: string): string {
   let result = text;
 
   for (const entry of KHMER_DICTIONARY) {
-    // Use word boundary matching where possible
     const escaped = entry.written.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${escaped}\\b`, 'g');
+    // Boundary: not preceded/followed by a letter or digit (Khmer U+1780-17FF, Latin, or any digit).
+    const regex = new RegExp(
+      `(?<![\\u1780-\\u17FFa-zA-Z0-9])${escaped}(?![\\u1780-\\u17FFa-zA-Z0-9])`,
+      'g'
+    );
     result = result.replace(regex, entry.spoken);
   }
 

@@ -107,11 +107,11 @@ export class MockTTSAdapter implements TTSAdapter {
 
   /**
    * Generate a WAV file with actual audio tone content (sine wave).
-   * 16-bit PCM, 22050 Hz, mono.
-   * Frequency varies by emotion to simulate voice characteristics.
+   * 16-bit PCM, 16000 Hz, mono — matches the pipeline target sample rate
+   * (Azure TTS outputs 16 kHz; the composer resamples everything to 16 kHz).
    */
   private generateToneWav(durationMs: number, emotion?: string): Buffer {
-    const sampleRate = 22050;
+    const sampleRate = 16000;
     const bitsPerSample = 16;
     const numChannels = 1;
     const bytesPerSample = bitsPerSample / 8;

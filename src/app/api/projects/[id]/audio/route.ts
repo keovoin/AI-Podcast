@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRequestUserId } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/rate-limit';
 import { getTTSAdapter } from '@/lib/providers/registry';
 import { decryptApiKey } from '@/lib/crypto';
 import { RoutingEngine } from '@/lib/routing/engine';
@@ -9,12 +11,95 @@ import type { AudioClipInput } from '@/lib/audio/composition';
 import type { RoutableProvider } from '@/lib/routing/engine';
 import type { AdapterConfig } from '@/lib/providers/adapters/base';
 import type { AdapterType, HealthStatus } from '@/types/provider';
+import { uploadFile, downloadFile } from '@/lib/storage';
+import { generateThumbnailSvgBuffer } from '@/lib/thumbnail';
+
+const AUDIO_CONTENT_TYPE = 'audio/wav';
+// Long-form safety: episodes that exceed this many turns are handed to the
+// background worker (workers/index.ts) instead of running synchronously in the
+// serverless request path. Vercel's Hobby function timeout is 10s (60s Pro);
+// a full episode with 60+ turns of real TTS cannot fit in that window.
+const WORKER_HANDOFF_TURNS = 60;
+
+/**
+ * GET /api/projects/:id/audio
+ * Serve the composed episode audio (or a single turn's clip with ?turnIndex=N).
+ * Supports HTTP Range requests so the browser <audio> element can seek/stream.
+ * Returns 202 with { status: 'NOT_READY' } if audio has not been generated yet.
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const userId = getRequestUserId(request);
+    const { searchParams } = new URL(request.url);
+    const turnIndex = searchParams.get('turnIndex');
+    const rawRange = request.headers.get('range');
+
+    const project = await prisma.project.findFirst({
+      where: { id, userId },
+      include: {
+        turns: { orderBy: { turnIndex: 'asc' }, include: { clip: true } },
+      },
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    // Single-clip serving: look up the clip for a specific turn
+    if (turnIndex !== null) {
+      const turn = project.turns.find((t) => t.turnIndex === parseInt(turnIndex, 10));
+      const clip = turn?.clip;
+      if (!clip) {
+        return NextResponse.json({ error: 'Clip not found' }, { status: 404 });
+      }
+      const key = clip.audioKey || clip.s3Key;
+      const clipBuffer = await downloadFile(key);
+      if (!clipBuffer || clipBuffer.length === 0) {
+        return NextResponse.json(
+          { error: 'Clip audio not available. Regenerate audio first.' },
+          { status: 409 }
+        );
+      }
+      return serveAudioBuffer(clipBuffer, AUDIO_CONTENT_TYPE, rawRange);
+    }
+
+    // Full episode: prefer the composed audio stored on the project
+    let buffer: Buffer | null = null;
+    if (project.audioKey) {
+      buffer = await downloadFile(project.audioKey);
+    }
+
+    if (!buffer || buffer.length === 0) {
+      // No composed episode on storage yet (e.g. clips generated but episode
+      // never composed, or storage is not configured). Returning 202 lets the
+      // client trigger POST /audio (regeneration) instead of a confusing 404.
+      return NextResponse.json(
+        { error: 'Audio not ready. Generate audio first.', status: 'NOT_READY' },
+        { status: 202 }
+      );
+    }
+
+    return serveAudioBuffer(buffer, AUDIO_CONTENT_TYPE, rawRange);
+  } catch (error) {
+    console.error('GET /api/projects/:id/audio error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch audio', details: error instanceof Error ? error.message : 'Unknown' },
+      { status: 500 }
+    );
+  }
+}
 
 /**
  * POST /api/projects/:id/audio
  * Generate audio for all turns (or a single turn if turnIndex is specified).
- * Each turn gets its own TTS clip, cached by content hash.
- * After all clips are generated, composes them into a single file.
+ * Each turn gets its own TTS clip, cached by content hash AND persisted to
+ * storage so cache hits skip the TTS call entirely.
+ * After all clips are generated, composes them into a single episode file,
+ * persists it, and auto-generates the episode thumbnail.
  */
 export async function POST(
   request: NextRequest,
@@ -22,9 +107,17 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const userId = 'default-user';
+    const userId = getRequestUserId(request);
     const body = await request.json().catch(() => ({}));
     const singleTurnIndex: number | undefined = body?.turnIndex;
+
+    const rate = checkRateLimit('audio-generate', userId);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again later.' },
+        { status: 429 }
+      );
+    }
 
     const project = await prisma.project.findFirst({
       where: { id, userId },
@@ -63,6 +156,34 @@ export async function POST(
       return NextResponse.json({ error: `Turn ${singleTurnIndex} not found.` }, { status: 404 });
     }
 
+    // Long-form support: hand large full-episode generations to the background
+    // worker so the serverless request path never times out. The worker claims
+    // QUEUED jobs and drives AUDIO_FULL jobs to completion (see workers/index.ts).
+    if (singleTurnIndex === undefined && turnsToProcess.length >= WORKER_HANDOFF_TURNS) {
+      const queued = await prisma.generationJob.create({
+        data: {
+          projectId: id,
+          type: 'AUDIO_FULL',
+          status: 'QUEUED',
+          totalSteps: turnsToProcess.length,
+          idempotencyKey: `audio-full-${id}-${Date.now()}`,
+        },
+      });
+      await prisma.project.update({
+        where: { id },
+        data: { status: 'GENERATING_AUDIO' },
+      });
+      return NextResponse.json(
+        {
+          jobId: queued.id,
+          status: 'QUEUED',
+          message: `Episode has ${turnsToProcess.length} turns; audio generation queued to the background worker. Poll GET /api/jobs/${queued.id} for progress.`,
+          progress: 0,
+        },
+        { status: 202 }
+      );
+    }
+
     // Create job record
     const job = await prisma.generationJob.create({
       data: {
@@ -84,6 +205,7 @@ export async function POST(
     const adapter = getTTSAdapter(ttsResolved.adapterType as AdapterType);
     const generatedClips: AudioClipInput[] = [];
     let completedSteps = 0;
+    let cacheHits = 0;
 
     for (const turn of turnsToProcess) {
       try {
@@ -110,24 +232,34 @@ export async function POST(
 
         let audio: Buffer;
         let durationMs: number;
+        let usedCache = false;
 
-        if (existingClip && !singleTurnIndex) {
-          // Use cached clip - skip TTS call
-          // In production, we'd fetch from S3. For now, regenerate.
-          // This is the cache-hit path placeholder.
-          const response = await adapter.synthesize(
-            {
-              text: ttsText,
-              voiceId,
-              language: project.language,
-              emotion: delivery?.emotion,
-              pace: delivery?.pace as 'slow' | 'normal' | 'fast' | undefined,
-              outputFormat: 'wav',
-            },
-            ttsResolved.config
-          );
-          audio = response.audio;
-          durationMs = response.durationMs;
+        const clipStorageKey = existingClip?.audioKey || existingClip?.s3Key;
+
+        if (existingClip && clipStorageKey) {
+          // REAL cache hit: fetch the persisted clip bytes, skip the TTS call.
+          const cachedBytes = await downloadFile(clipStorageKey);
+          if (cachedBytes && cachedBytes.length > 0) {
+            audio = cachedBytes;
+            durationMs = existingClip.durationMs;
+            usedCache = true;
+            cacheHits++;
+          } else {
+            // Cache record exists but bytes are gone — synthesize fresh.
+            const response = await adapter.synthesize(
+              {
+                text: ttsText,
+                voiceId,
+                language: project.language,
+                emotion: delivery?.emotion,
+                pace: delivery?.pace as 'slow' | 'normal' | 'fast' | undefined,
+                outputFormat: 'wav',
+              },
+              ttsResolved.config
+            );
+            audio = response.audio;
+            durationMs = response.durationMs;
+          }
         } else {
           // Generate new clip
           const response = await adapter.synthesize(
@@ -145,6 +277,10 @@ export async function POST(
           durationMs = response.durationMs;
         }
 
+        // Persist clip bytes to storage so future cache hits can skip TTS
+        const audioKey = `projects/${id}/clips/${turn.turnIndex}.wav`;
+        await uploadFile(audioKey, audio, AUDIO_CONTENT_TYPE);
+
         // Store normalized text
         await prisma.dialogueTurn.update({
           where: { id: turn.id },
@@ -161,17 +297,20 @@ export async function POST(
             voiceId,
             textHash: cacheKey,
             s3Key: `projects/${id}/clips/${turn.turnIndex}.wav`,
+            audioKey,
             durationMs,
             format: 'wav',
             sizeBytes: audio.length,
-            cached: false,
+            cached: usedCache,
           },
           update: {
             providerId: ttsResolved.providerId,
             voiceId,
             textHash: cacheKey,
+            audioKey,
             durationMs,
             sizeBytes: audio.length,
+            cached: usedCache,
           },
         });
 
@@ -212,6 +351,18 @@ export async function POST(
           });
         }
       }
+      // Persist the composed episode audio so GET can serve it
+      if (composedResult.audio.length > 0) {
+        const episodeKey = `projects/${id}/episode.wav`;
+        await uploadFile(episodeKey, composedResult.audio, AUDIO_CONTENT_TYPE);
+        await prisma.project.update({
+          where: { id },
+          data: {
+            audioKey: episodeKey,
+            audioUrl: `/api/projects/${id}/audio`,
+          },
+        });
+      }
     }
 
     // Mark job complete
@@ -223,10 +374,33 @@ export async function POST(
         progress: 1,
         completedSteps,
         result: composedResult
-          ? { totalDurationMs: composedResult.totalDurationMs, clipCount: generatedClips.length }
-          : { clipCount: generatedClips.length },
+          ? { totalDurationMs: composedResult.totalDurationMs, clipCount: generatedClips.length, cacheHits }
+          : { clipCount: generatedClips.length, cacheHits },
       },
     });
+
+    // Auto-generate episode thumbnail after audio completes
+    let thumbnailUrl: string | null = null;
+    try {
+      const speakerNames = project.speakers.map((ps) => ps.speaker.name);
+      const thumbnailKey = `thumbnails/${id}.svg`;
+      const svgBuffer = generateThumbnailSvgBuffer({
+        title: project.title,
+        topic: project.topic,
+        language: project.language,
+        speakerNames,
+        status: 'AUDIO_READY',
+      });
+      await uploadFile(thumbnailKey, svgBuffer, 'image/svg+xml');
+      thumbnailUrl = `/api/projects/${id}/thumbnail`;
+      await prisma.project.update({
+        where: { id },
+        data: { thumbnailKey, thumbnailUrl },
+      });
+    } catch (thumbError) {
+      // Thumbnail failure must not fail the audio generation
+      console.error('Thumbnail generation failed (non-fatal):', thumbError);
+    }
 
     // Update project status
     await prisma.project.update({
@@ -238,8 +412,11 @@ export async function POST(
       jobId: job.id,
       status: 'COMPLETED',
       clipsGenerated: generatedClips.length,
+      cacheHits,
       totalDurationMs: composedResult?.totalDurationMs,
       timestamps: composedResult?.timestamps,
+      audioUrl: `/api/projects/${id}/audio`,
+      thumbnailUrl,
     });
   } catch (error) {
     console.error('POST /api/projects/:id/audio error:', error);
@@ -248,6 +425,65 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+// === Audio serving helpers ===
+
+function serveAudioBuffer(buffer: Buffer, contentType: string, rawRange: string | null) {
+  const total = buffer.length;
+
+  if (!rawRange) {
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(total),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=3600',
+      },
+    });
+  }
+
+  // Parse "bytes=start-end" | "bytes=start-" | "bytes=-suffix"
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rawRange.trim());
+  if (!match) {
+    return new NextResponse(null, {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${total}` },
+    });
+  }
+
+  let start: number;
+  let end: number;
+
+  if (match[1] === '') {
+    // Suffix range: last N bytes
+    const suffix = parseInt(match[2] || '0', 10);
+    start = Math.max(0, total - suffix);
+    end = total - 1;
+  } else {
+    start = parseInt(match[1]!, 10);
+    end = match[2] === '' ? total - 1 : Math.min(parseInt(match[2]!, 10), total - 1);
+  }
+
+  if (start > end || start >= total) {
+    return new NextResponse(null, {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${total}` },
+    });
+  }
+
+  const chunk = buffer.subarray(start, end + 1);
+  return new NextResponse(new Uint8Array(chunk), {
+    status: 206,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(chunk.length),
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=3600',
+    },
+  });
 }
 
 // === Helpers ===

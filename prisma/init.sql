@@ -139,6 +139,10 @@ CREATE TABLE "projects" (
     "locked_llm_id" TEXT,
     "locked_tts_id" TEXT,
     "status" "ProjectStatus" NOT NULL DEFAULT 'DRAFT',
+    "audio_key" TEXT,
+    "audio_url" TEXT,
+    "thumbnail_key" TEXT,
+    "thumbnail_url" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "projects_pkey" PRIMARY KEY ("id")
@@ -234,6 +238,7 @@ CREATE TABLE "audio_clips" (
     "voice_id" TEXT NOT NULL,
     "text_hash" TEXT NOT NULL,
     "s3_key" TEXT NOT NULL,
+    "audio_key" TEXT,
     "duration_ms" INTEGER NOT NULL,
     "start_time_ms" INTEGER,
     "format" TEXT NOT NULL DEFAULT 'mp3',
