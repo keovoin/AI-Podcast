@@ -1,5 +1,5 @@
 export type ProviderCategory = 'LLM' | 'TTS' | 'STT' | 'EMBEDDING';
-export type AdapterType = 'OPENAI_COMPATIBLE' | 'CUSTOM_REST' | 'AZURE_SPEECH' | 'MOCK';
+export type AdapterType = 'OPENAI_COMPATIBLE' | 'CUSTOM_REST' | 'GEMINI' | 'AZURE_SPEECH' | 'MOCK';
 export type AuthType = 'BEARER' | 'API_KEY_HEADER' | 'QUERY_PARAM' | 'CUSTOM' | 'NONE';
 export type AudioResponseType = 'BINARY' | 'BASE64_JSON' | 'DOWNLOAD_URL';
 export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY' | 'UNKNOWN';

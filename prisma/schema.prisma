@@ -81,6 +81,7 @@ enum ProviderCategory {
 enum AdapterType {
   OPENAI_COMPATIBLE
   CUSTOM_REST
+  GEMINI
   AZURE_SPEECH
   MOCK
 }

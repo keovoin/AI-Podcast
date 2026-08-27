@@ -6,7 +6,7 @@
 -- Enums
 CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'USER');
 CREATE TYPE "ProviderCategory" AS ENUM ('LLM', 'TTS', 'STT', 'EMBEDDING');
-CREATE TYPE "AdapterType" AS ENUM ('OPENAI_COMPATIBLE', 'CUSTOM_REST', 'AZURE_SPEECH', 'MOCK');
+CREATE TYPE "AdapterType" AS ENUM ('OPENAI_COMPATIBLE', 'CUSTOM_REST', 'GEMINI', 'AZURE_SPEECH', 'MOCK');
 CREATE TYPE "AuthType" AS ENUM ('BEARER', 'API_KEY_HEADER', 'QUERY_PARAM', 'CUSTOM', 'NONE');
 CREATE TYPE "AudioResponseType" AS ENUM ('BINARY', 'BASE64_JSON', 'DOWNLOAD_URL');
 CREATE TYPE "KeySource" AS ENUM ('DIRECT', 'ENV_VARIABLE');
@@ -377,6 +377,19 @@ ON CONFLICT ("id") DO NOTHING;
 INSERT INTO "providers" ("id", "user_id", "name", "category", "adapter_type", "model", "auth_type", "timeout_ms", "enabled", "priority", "cost_metadata", "allow_sensitive") VALUES
 ('mock-llm-provider', 'default-user', 'Mock LLM (Testing)', 'LLM', 'MOCK', 'mock-gpt-4', 'NONE', 30000, true, 80, '{"costPerRequest": 0.001, "currency": "USD"}', true)
 ON CONFLICT ("id") DO NOTHING;
+
+-- Gemini Flash Lite LLM Provider (uses GEMINI_API_KEY env var; requires a valid key)
+INSERT INTO "providers" ("id", "user_id", "name", "category", "adapter_type", "base_url", "endpoint_path", "model", "auth_type", "timeout_ms", "enabled", "priority", "cost_metadata", "allow_sensitive") VALUES
+('gemini-llm-provider', 'default-user', 'Gemini 3.5 Flash Lite', 'LLM', 'GEMINI', 'https://generativelanguage.googleapis.com', '/v1beta/models', 'gemini-3.5-flash-lite', 'BEARER', 60000, true, 90, '{"costPerRequest": 0.0001, "currency": "USD"}', true)
+ON CONFLICT ("id") DO NOTHING;
+
+INSERT INTO "provider_health" ("id", "provider_id", "status", "last_checked", "last_latency_ms", "avg_latency_ms", "success_rate", "total_requests", "failed_requests") VALUES
+('health-gemini', 'gemini-llm-provider', 'UNKNOWN', NOW(), NULL, NULL, NULL, 0, 0)
+ON CONFLICT ("provider_id") DO NOTHING;
+
+INSERT INTO "provider_capabilities" ("id", "provider_id", "capability", "languages") VALUES
+('cap-gemini', 'gemini-llm-provider', 'text-generation', '["km-KH", "en-US"]')
+ON CONFLICT ("provider_id", "capability") DO NOTHING;
 
 INSERT INTO "provider_health" ("id", "provider_id", "status", "last_checked", "last_latency_ms", "avg_latency_ms", "success_rate", "total_requests", "failed_requests") VALUES
 ('health-llm', 'mock-llm-provider', 'HEALTHY', NOW(), 100, 100, 1.0, 100, 0)

@@ -1,6 +1,7 @@
 import type { LLMAdapter, TTSAdapter } from './adapters';
 import { MockLLMAdapter } from './adapters/mock-llm';
 import { MockTTSAdapter } from './adapters/mock-tts';
+import { GeminiLLMAdapter } from './adapters/gemini-llm';
 import { OpenAICompatibleLLMAdapter } from './adapters/openai-compatible-llm';
 import { CustomRestLLMAdapter } from './adapters/custom-rest-llm';
 import { AzureSpeechTTSAdapter } from './adapters/azure-speech-tts';
@@ -17,6 +18,7 @@ import type { AdapterType } from '@/types/provider';
 const llmAdapters: Record<string, LLMAdapter> = {
   OPENAI_COMPATIBLE: new OpenAICompatibleLLMAdapter(),
   CUSTOM_REST: new CustomRestLLMAdapter(),
+  GEMINI: new GeminiLLMAdapter(),
   MOCK: new MockLLMAdapter(),
 };
 

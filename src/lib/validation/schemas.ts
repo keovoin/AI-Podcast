@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 export const providerCategorySchema = z.enum(['LLM', 'TTS', 'STT', 'EMBEDDING']);
 
-export const adapterTypeSchema = z.enum(['OPENAI_COMPATIBLE', 'CUSTOM_REST', 'AZURE_SPEECH', 'MOCK']);
+export const adapterTypeSchema = z.enum(['OPENAI_COMPATIBLE', 'CUSTOM_REST', 'GEMINI', 'AZURE_SPEECH', 'MOCK']);
 
 export const authTypeSchema = z.enum(['BEARER', 'API_KEY_HEADER', 'QUERY_PARAM', 'CUSTOM', 'NONE']);
 

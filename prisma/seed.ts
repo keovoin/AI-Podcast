@@ -70,6 +70,49 @@ async function main() {
 
   console.log(`Created provider: ${mockLlm.name}`);
 
+  // Create Gemini Flash Lite LLM provider (uses GEMINI_API_KEY env var at call time)
+  const geminiLlm = await prisma.provider.upsert({
+    where: { id: 'gemini-llm-provider' },
+    update: {},
+    create: {
+      id: 'gemini-llm-provider',
+      userId: user.id,
+      name: 'Gemini 3.5 Flash Lite',
+      category: 'LLM',
+      adapterType: 'GEMINI',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      endpointPath: '/v1beta/models',
+      model: 'gemini-3.5-flash-lite',
+      authType: 'BEARER',
+      timeoutMs: 60000,
+      enabled: true,
+      priority: 90,
+      costMetadata: { costPerRequest: 0.0001, currency: 'USD' },
+      allowSensitive: true,
+    },
+  });
+
+  await prisma.providerHealth.upsert({
+    where: { providerId: geminiLlm.id },
+    update: {},
+    create: {
+      providerId: geminiLlm.id,
+      status: 'UNKNOWN',
+    },
+  });
+
+  await prisma.providerCapability.upsert({
+    where: { providerId_capability: { providerId: geminiLlm.id, capability: 'text-generation' } },
+    update: {},
+    create: {
+      providerId: geminiLlm.id,
+      capability: 'text-generation',
+      languages: ['km-KH', 'en-US'],
+    },
+  });
+
+  console.log(`Created provider: ${geminiLlm.name}`);
+
   // Create mock TTS provider
   const mockTts = await prisma.provider.upsert({
     where: { id: 'mock-tts-provider' },
