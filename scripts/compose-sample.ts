@@ -39,7 +39,7 @@ async function main() {
   // 1) Normalize every turn with the repo's Khmer normalization pipeline
   const normalizedTurns = TURNS.map((t) => {
     const n = normalizeKhmerText(t.text, 'km');
-    return { ...t, normalized: n.normalized, warnings: n.warnings ?? [] };
+    return { ...t, normalized: n.normalized };
   });
 
   // 2) Read the real 16 kHz mono WAV clips
@@ -96,7 +96,6 @@ async function main() {
           text: t.text,
           normalized: t.normalized,
           estimatedSeconds: Math.round((t.text.length / 12) * 10) / 10,
-          warnings: t.warnings,
         })),
       },
       null,
