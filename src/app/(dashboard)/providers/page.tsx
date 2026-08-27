@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { ProviderForm } from '@/components/providers/provider-form';
 import { RoutingExplanation } from '@/components/routing/routing-explanation';
+import { Dialog } from '@/components/ui/dialog';
 
 interface Provider {
   id: string;
@@ -34,6 +35,7 @@ export default function ProvidersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Provider | null>(null);
 
   useEffect(() => {
     fetchProviders();
@@ -89,12 +91,13 @@ export default function ProvidersPage() {
   }
 
   async function deleteProvider(id: string) {
-    if (!confirm('Are you sure you want to delete this provider?')) return;
     try {
       await fetch(`/api/providers/${id}`, { method: 'DELETE' });
+      setDeleteTarget(null);
       await fetchProviders();
     } catch (error) {
       console.error('Failed to delete provider:', error);
+      setDeleteTarget(null);
     }
   }
 
@@ -243,7 +246,7 @@ export default function ProvidersPage() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => deleteProvider(provider.id)}
+                      onClick={() => setDeleteTarget(provider)}
                     >
                       Delete
                     </Button>
@@ -259,6 +262,24 @@ export default function ProvidersPage() {
           ))
         )}
       </div>
+
+      {/* Confirm delete — replaces window.confirm */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete provider?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed, including its secrets, health and benchmark data. This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => deleteTarget && deleteProvider(deleteTarget.id)}
+      />
     </div>
   );
 }

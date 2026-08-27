@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog } from '@/components/ui/dialog';
 
 interface Speaker {
   id: string;
@@ -30,6 +31,7 @@ export default function SpeakersPage() {
     name: '', role: '', personality: '', voiceId: 'mock-km-male-1',
     formality: 50, energy: 50, humor: 30, assertiveness: 50,
   });
+  const [deleteTarget, setDeleteTarget] = useState<Speaker | null>(null);
 
   useEffect(() => { fetchSpeakers(); }, []);
 
@@ -56,8 +58,8 @@ export default function SpeakersPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this speaker?')) return;
     await fetch(`/api/speakers/${id}`, { method: 'DELETE' });
+    setDeleteTarget(null);
     fetchSpeakers();
   }
 
@@ -175,12 +177,30 @@ export default function SpeakersPage() {
                   {previewLoading === s.id ? '...' : '▶ Preview'}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => startEdit(s)}>Edit</Button>
-                <Button variant="destructive" size="sm" onClick={() => handleDelete(s.id)}>Delete</Button>
+                <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(s)}>Delete</Button>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Confirm delete — replaces window.confirm */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete speaker?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed from all projects. This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+      />
     </div>
   );
 }

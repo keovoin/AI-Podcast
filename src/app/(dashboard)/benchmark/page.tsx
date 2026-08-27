@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog } from '@/components/ui/dialog';
 
 interface Provider {
   id: string;
@@ -52,6 +53,7 @@ export default function BenchmarkPage() {
   const [results, setResults] = useState<BenchmarkResult[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingProviders, setLoadingProviders] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     loadProviders();
@@ -111,7 +113,7 @@ export default function BenchmarkPage() {
         await fetchResults();
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || 'Failed to save');
+        setSaveError(err.error || 'Failed to save');
       }
     } finally {
       setSaving(false);
@@ -227,6 +229,19 @@ export default function BenchmarkPage() {
           </Card>
         </div>
       </div>
+
+      {/* Save error — replaces window.alert */}
+      <Dialog
+        open={saveError !== null}
+        onOpenChange={(open) => {
+          if (!open) setSaveError(null);
+        }}
+        title="Failed to save benchmark"
+        description={saveError ?? undefined}
+        confirmLabel="OK"
+        hideFooter
+        onConfirm={() => setSaveError(null)}
+      />
     </div>
   );
 }

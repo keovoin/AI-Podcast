@@ -1,10 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 interface Turn {
   id: string;
@@ -29,6 +35,72 @@ interface Project {
   outline?: { segments: unknown[]; locked: boolean } | null;
   turns: Turn[];
   exports: Array<{ id: string; format: string; createdAt: string; sizeBytes?: number }>;
+  thumbnailUrl?: string | null;
+}
+
+const PIPELINE_STEPS = [
+  { key: 'outline', label: '1. Outline' },
+  { key: 'dialogue', label: '2. Dialogue' },
+  { key: 'validate', label: '3. Validate' },
+  { key: 'audio', label: '4. Audio' },
+  { key: 'export', label: '5. Export' },
+];
+
+/** Single shared add-turn form — replaces the 3 duplicated copies */
+function AddTurnForm({
+  speakers,
+  insertLabel,
+  onAdd,
+  onCancel,
+  busy,
+}: {
+  speakers: Array<{ speaker: { id: string; name: string } }>;
+  insertLabel: string;
+  onAdd: (speakerId: string, text: string) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [speakerId, setSpeakerId] = useState(speakers[0]?.speaker.id || '');
+  const [text, setText] = useState('');
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-primary/40 bg-primary/5 p-3 animate-fade-in">
+      <p className="text-xs font-medium text-primary">{insertLabel}</p>
+      <Select
+        value={speakerId}
+        onChange={(e) => setSpeakerId(e.target.value)}
+        aria-label="Select speaker"
+      >
+        {speakers.map((s) => (
+          <option key={s.speaker.id} value={s.speaker.id}>
+            {s.speaker.name}
+          </option>
+        ))}
+      </Select>
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Enter the turn text..."
+        aria-label="New turn text"
+      />
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={() => {
+            if (!speakerId || !text.trim()) return;
+            onAdd(speakerId, text.trim());
+            setText('');
+          }}
+          disabled={busy || !speakerId || !text.trim()}
+        >
+          {busy ? 'Adding...' : 'Add Turn'}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function ProjectDetailPage() {
@@ -42,29 +114,39 @@ export default function ProjectDetailPage() {
   const [editingTurn, setEditingTurn] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [targetTurns, setTargetTurns] = useState<string>('');
-  // Add-turn form state
   const [addingAfter, setAddingAfter] = useState<number | null>(null);
-  const [newTurnSpeaker, setNewTurnSpeaker] = useState('');
-  const [newTurnText, setNewTurnText] = useState('');
   const [showAddAtEnd, setShowAddAtEnd] = useState(false);
+  // Dialogs replacing window.alert/confirm
+  const [deleteTurnTarget, setDeleteTurnTarget] = useState<number | null>(null);
+  const [validationDialog, setValidationDialog] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
 
-  useEffect(() => { fetchProject(); }, [id]);
-
-  async function fetchProject() {
-    try {
-      const res = await fetch(`/api/projects/${id}`);
-      if (res.ok) {
-        setProject(await res.json());
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setActionError(`Failed to load project: ${err.error || err.details || `HTTP ${res.status}`}`);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setProject(data);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (!cancelled) setActionError(`Failed to load project: ${err.error || err.details || `HTTP ${res.status}`}`);
+        }
+      } catch (e) {
+        if (!cancelled) setActionError(`Network error loading project: ${e instanceof Error ? e.message : 'unknown'}`);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (e) {
-      setActionError(`Network error loading project: ${e instanceof Error ? e.message : 'unknown'}`);
-    } finally {
-      setLoading(false);
-    }
-  }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const fetchProject = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}`);
+    if (res.ok) setProject(await res.json());
+  }, [id]);
 
   async function callAction(url: string, label: string, method = 'POST', body?: object) {
     setActionLoading(label);
@@ -102,30 +184,25 @@ export default function ProjectDetailPage() {
     await callAction(`/api/projects/${id}/dialogue`, 'dialogue', 'POST', body);
   }
 
-  async function addTurn(insertAfter: number | null) {
-    if (!newTurnSpeaker || !newTurnText.trim()) {
-      setActionError('Select a speaker and enter text for the new turn.');
-      return;
-    }
+  async function addTurn(insertAfter: number | null, speakerId: string, text: string) {
     const result = await callAction(`/api/projects/${id}/dialogue`, 'add turn', 'PUT', {
       action: 'add',
-      speakerId: newTurnSpeaker,
-      text: newTurnText.trim(),
+      speakerId,
+      text,
       insertAfter,
     });
     if (result) {
-      setNewTurnText('');
       setAddingAfter(null);
       setShowAddAtEnd(false);
     }
   }
 
   async function deleteTurn(turnIndex: number) {
-    if (!confirm('Delete this turn?')) return;
     await callAction(`/api/projects/${id}/dialogue`, 'delete turn', 'PUT', {
       action: 'delete',
       turnIndex,
     });
+    setDeleteTurnTarget(null);
   }
 
   async function generateAudio(turnIndex?: number) {
@@ -138,9 +215,14 @@ export default function ProjectDetailPage() {
     if (result) {
       if (result.valid) {
         setActionError(null);
-        alert(`Validation passed! ${result.stats.turnCount} turns, ${result.stats.totalEstimatedSeconds.toFixed(0)}s estimated.`);
+        setValidationDialog({
+          open: true,
+          message: `Validation passed! ${result.stats.turnCount} turns, ${result.stats.totalEstimatedSeconds.toFixed(0)}s estimated.`,
+        });
       } else {
-        setActionError(`Validation: ${result.errors.length} errors, ${result.warnings.length} warnings. First error: ${result.errors[0]?.message || 'none'}`);
+        setActionError(
+          `Validation: ${result.errors.length} errors, ${result.warnings.length} warnings. First error: ${result.errors[0]?.message || 'none'}`
+        );
       }
     }
   }
@@ -175,53 +257,149 @@ export default function ProjectDetailPage() {
     setEditingTurn(null);
   }
 
-  if (loading) return <div className="container py-10"><p className="text-muted-foreground">Loading...</p></div>;
-  if (!project) return <div className="container py-10"><p className="text-destructive">Project not found. Check the URL.</p></div>;
+  if (loading) {
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-destructive">
+        Project not found. Check the URL.
+      </div>
+    );
+  }
 
   const speakerNames: Record<string, string> = {};
-  project.speakers.forEach((ps) => { speakerNames[ps.speaker.id] = ps.speaker.name; });
+  project.speakers.forEach((ps) => {
+    speakerNames[ps.speaker.id] = ps.speaker.name;
+  });
+
+  const pipelineStatus = (() => {
+    const hasOutline = !!project.outline;
+    const hasDialogue = project.turns.length > 0;
+    const hasAudio = project.turns.some((t) => t.clip);
+    const hasExport = project.exports.length > 0;
+    return { hasOutline, hasDialogue, hasAudio, hasExport };
+  })();
+
+  const stepState = (key: string): 'done' | 'current' | 'todo' => {
+    switch (key) {
+      case 'outline':
+        return pipelineStatus.hasOutline ? 'done' : actionLoading === 'outline' ? 'current' : 'todo';
+      case 'dialogue':
+        return pipelineStatus.hasDialogue ? 'done' : actionLoading === 'dialogue' ? 'current' : 'todo';
+      case 'validate':
+        return pipelineStatus.hasDialogue ? (pipelineStatus.hasAudio ? 'done' : 'todo') : 'todo';
+      case 'audio':
+        return pipelineStatus.hasAudio ? 'done' : actionLoading === 'audio' ? 'current' : 'todo';
+      case 'export':
+        return pipelineStatus.hasExport ? 'done' : actionLoading === 'export' ? 'current' : 'todo';
+      default:
+        return 'todo';
+    }
+  };
 
   return (
-    <div className="container py-10">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">{project.title}</h1>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <Badge>{project.status.replace(/_/g, ' ')}</Badge>
-            <Badge variant="outline">{project.language}</Badge>
-            <Badge variant="outline">{project.routingMode}</Badge>
-            {project.targetDuration && <Badge variant="secondary">{Math.round(project.targetDuration / 60)} min</Badge>}
-            <Badge variant="secondary">{project.speakers.length} speakers</Badge>
-            <Badge variant="secondary">{project.turns.length} turns</Badge>
+    <div className="space-y-6">
+      {/* Header with thumbnail */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
+          {project.thumbnailUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={project.thumbnailUrl}
+              alt=""
+              className="hidden h-20 w-20 shrink-0 rounded-lg border border-border object-cover sm:block"
+            />
+          )}
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{project.title}</h1>
+            {project.topic && <p className="mt-0.5 text-sm text-muted-foreground">{project.topic}</p>}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge>{project.status.replace(/_/g, ' ')}</Badge>
+              <Badge variant="outline">{project.language.toUpperCase()}</Badge>
+              <Badge variant="outline">{project.routingMode.replace(/_/g, ' ')}</Badge>
+              {project.targetDuration && (
+                <Badge variant="secondary">{Math.round(project.targetDuration / 60)} min</Badge>
+              )}
+              <Badge variant="secondary">{project.speakers.length} speakers</Badge>
+              <Badge variant="secondary">{project.turns.length} turns</Badge>
+            </div>
           </div>
+        </div>
+        <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/projects/${id}/timeline`}>🎬 Timeline</Link>
+          </Button>
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <Card className="mb-6">
+      {/* Action buttons + pipeline stepper */}
+      <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Actions</CardTitle>
-          <CardDescription>Generate content step by step: Outline → Dialogue → Audio → Export</CardDescription>
+          <CardTitle className="text-lg">Production Pipeline</CardTitle>
+          <CardDescription>
+            Generate content step by step: Outline → Dialogue → Audio → Export
+          </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Pipeline stepper — non-color status via check/current markers */}
+          <ol className="mb-5 flex flex-wrap items-center gap-2" aria-label="Production pipeline status">
+            {PIPELINE_STEPS.map((s, i) => {
+              const state = stepState(s.key);
+              return (
+                <li key={s.key} className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+                      state === 'done' && 'border-success/40 bg-success/10 text-success',
+                      state === 'current' && 'border-primary/40 bg-primary/10 text-primary',
+                      state === 'todo' && 'border-border bg-muted/40 text-muted-foreground'
+                    )}
+                    aria-current={state === 'current' ? 'step' : undefined}
+                  >
+                    <span aria-hidden="true">
+                      {state === 'done' ? '✓' : state === 'current' ? '◐' : i + 1}
+                    </span>
+                    {s.label}
+                  </span>
+                  {i < PIPELINE_STEPS.length - 1 && (
+                    <span className="text-muted-foreground/50" aria-hidden="true">
+                      →
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
           {actionError && (
-            <div className="p-3 rounded bg-destructive/10 text-destructive text-sm mb-4">
-              {actionError}
+            <div role="alert" className="mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              <span aria-hidden="true">⚠️</span>
+              <span>{actionError}</span>
             </div>
           )}
           {actionSuccess && (
-            <div className="p-3 rounded bg-green-500/10 text-green-500 text-sm mb-4">
-              {actionSuccess}
+            <div role="status" className="mb-4 flex items-start gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
+              <span aria-hidden="true">✓</span>
+              <span>{actionSuccess}</span>
             </div>
           )}
-          <div className="flex gap-2 flex-wrap">
+
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={generateOutline} disabled={!!actionLoading} variant="outline">
-              {actionLoading === 'outline' ? 'Generating Outline...' : '1. Generate Outline'}
+              {actionLoading === 'outline' ? 'Generating Outline…' : '1. Generate Outline'}
             </Button>
             <div className="flex items-center gap-1">
               <Button onClick={generateDialogue} disabled={!!actionLoading} variant="outline">
-                {actionLoading === 'dialogue' ? 'Generating Dialogue...' : '2. Generate Dialogue'}
+                {actionLoading === 'dialogue' ? 'Generating Dialogue…' : '2. Generate Dialogue'}
               </Button>
               <input
                 type="number"
@@ -230,30 +408,64 @@ export default function ProjectDetailPage() {
                 value={targetTurns}
                 onChange={(e) => setTargetTurns(e.target.value)}
                 placeholder="# turns"
-                title="Optional: number of turns to generate"
-                className="h-10 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                aria-label="Optional number of turns"
+                className="h-10 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
-            <Button onClick={validate} disabled={!!actionLoading || project.turns.length === 0} variant="outline">
-              {actionLoading === 'validate' ? 'Validating...' : '3. Validate'}
+            <Button
+              onClick={validate}
+              disabled={!!actionLoading || project.turns.length === 0}
+              variant="outline"
+            >
+              {actionLoading === 'validate' ? 'Validating…' : '3. Validate'}
             </Button>
-            <Button onClick={() => generateAudio()} disabled={!!actionLoading || project.turns.length === 0} variant="outline">
-              {actionLoading === 'audio' ? 'Generating Audio...' : '4. Generate Audio'}
+            <Button
+              onClick={() => generateAudio()}
+              disabled={!!actionLoading || project.turns.length === 0}
+              variant="outline"
+            >
+              {actionLoading === 'audio' ? 'Generating Audio…' : '4. Generate Audio'}
             </Button>
-            <Button onClick={exportProject} disabled={!!actionLoading || project.turns.length === 0}>
-              {actionLoading === 'export' ? 'Exporting...' : '5. Export ZIP'}
+            <Button
+              onClick={exportProject}
+              disabled={!!actionLoading || project.turns.length === 0}
+            >
+              {actionLoading === 'export' ? 'Exporting…' : '5. Export ZIP'}
             </Button>
           </div>
           {project.speakers.length < 2 && (
-            <p className="text-sm text-destructive mt-3">
+            <p className="mt-3 text-sm text-destructive">
               You need at least 2 speakers to generate content. Add speakers from the project creation wizard or API.
             </p>
           )}
         </CardContent>
       </Card>
 
+      {/* Episode audio player */}
+      {project.status === 'AUDIO_READY' || project.status === 'EXPORTED' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">\ud83c\udfa7 Episode Audio</CardTitle>
+            <CardDescription>Stream the generated episode (WAV, 16 kHz mono) — supports seeking via HTTP Range.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <audio
+              controls
+              preload="metadata"
+              className="w-full"
+              src={`/api/projects/${id}/audio`}
+            >
+              Your browser does not support the audio element.
+            </audio>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Re-generate audio to update the episode. Single-turn regeneration is available in the turns list below.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* Speakers */}
-      <Card className="mb-6">
+      <Card>
         <CardHeader>
           <CardTitle className="text-lg">Speakers ({project.speakers.length})</CardTitle>
         </CardHeader>
@@ -261,12 +473,12 @@ export default function ProjectDetailPage() {
           {project.speakers.length === 0 ? (
             <p className="text-muted-foreground">No speakers assigned to this project.</p>
           ) : (
-            <div className="flex gap-4 flex-wrap">
+            <div className="flex flex-wrap gap-3">
               {project.speakers.map((ps) => (
-                <div key={ps.speaker.id} className="p-3 border rounded-lg">
+                <div key={ps.speaker.id} className="rounded-lg border border-border bg-muted/30 p-3">
                   <p className="font-medium">{ps.speaker.name}</p>
                   <p className="text-sm text-muted-foreground">{ps.speaker.role || 'Speaker'}</p>
-                  <p className="text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
                 </div>
               ))}
             </div>
@@ -276,24 +488,28 @@ export default function ProjectDetailPage() {
 
       {/* Outline */}
       {project.outline && (
-        <Card className="mb-6">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Outline ({(project.outline.segments as unknown[]).length} segments)</CardTitle>
+            <CardTitle className="text-lg">
+              Outline ({(project.outline.segments as unknown[]).length} segments)
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
               {(project.outline.segments as Array<{ id: string; title: string; duration_seconds: number; lead_speaker_id: string; questions?: string[] }>).map((seg, i) => (
-                <div key={seg.id || i} className="p-3 border rounded-lg">
+                <div key={seg.id || i} className="rounded-lg border border-border p-3">
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{seg.title}</span>
                     <Badge variant="secondary">{seg.duration_seconds}s</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Lead: {speakerNames[seg.lead_speaker_id] || seg.lead_speaker_id}
                   </p>
                   {seg.questions && seg.questions.length > 0 && (
-                    <ul className="text-xs text-muted-foreground mt-1 list-disc list-inside">
-                      {seg.questions.map((q, qi) => <li key={qi}>{q}</li>)}
+                    <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
+                      {seg.questions.map((q, qi) => (
+                        <li key={qi}>{q}</li>
+                      ))}
                     </ul>
                   )}
                 </div>
@@ -307,23 +523,28 @@ export default function ProjectDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Dialogue ({project.turns.length} turns)</CardTitle>
-          <CardDescription>Click text to edit. Use 🔄 to regenerate audio, ➕ to insert a turn, 🗑 to delete.</CardDescription>
+          <CardDescription>
+            Click text to edit. Use 🔄 to regenerate audio, ＋ to insert a turn, 🗑 to delete.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {project.turns.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-center">
-              No dialogue yet. Click "1. Generate Outline" then "2. Generate Dialogue" above.
-            </p>
+            <div className="py-4 text-center text-sm text-muted-foreground">
+              No dialogue yet. Click &quot;1. Generate Outline&quot; then &quot;2. Generate Dialogue&quot; above.
+            </div>
           ) : (
             <div className="space-y-2">
               {project.turns.map((turn) => (
                 <div
                   key={turn.id}
-                  className={`p-3 rounded-lg border ${editingTurn === turn.turnIndex ? 'border-primary' : 'hover:border-primary/50'} transition-colors`}
+                  className={cn(
+                    'rounded-lg border border-border p-3 transition-colors',
+                    editingTurn === turn.turnIndex ? 'border-primary' : 'hover:border-primary/50'
+                  )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
                           {speakerNames[turn.speakerId] || turn.speakerId}
                         </Badge>
@@ -331,57 +552,82 @@ export default function ProjectDetailPage() {
                           <span className="text-xs text-muted-foreground">{turn.delivery.emotion}</span>
                         )}
                         {turn.estimatedSeconds && (
-                          <span className="text-xs text-muted-foreground">{turn.estimatedSeconds.toFixed(1)}s</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {turn.estimatedSeconds.toFixed(1)}s
+                          </span>
                         )}
                         {turn.clip && (
-                          <Badge variant="success" className="text-xs">Audio ready</Badge>
+                          <Badge variant="success" className="text-xs" dot>
+                            <span>Audio ready</span>
+                          </Badge>
                         )}
                       </div>
                       {editingTurn === turn.turnIndex ? (
                         <div className="space-y-2">
-                          <textarea
+                          <Textarea
                             value={editText}
                             onChange={(e) => setEditText(e.target.value)}
-                            className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            aria-label={`Edit text for turn ${turn.turnIndex}`}
                           />
                           <div className="flex gap-2">
-                            <Button size="sm" onClick={() => saveTurnEdit(turn.turnIndex)}>Save</Button>
-                            <Button size="sm" variant="outline" onClick={() => setEditingTurn(null)}>Cancel</Button>
+                            <Button size="sm" onClick={() => saveTurnEdit(turn.turnIndex)}>
+                              Save
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setEditingTurn(null)}>
+                              Cancel
+                            </Button>
                           </div>
                         </div>
                       ) : (
                         <p
-                          className="text-sm cursor-pointer"
-                          onClick={() => { setEditingTurn(turn.turnIndex); setEditText(turn.text); }}
+                          className="cursor-pointer text-sm"
+                          onClick={() => {
+                            setEditingTurn(turn.turnIndex);
+                            setEditText(turn.text);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              setEditingTurn(turn.turnIndex);
+                              setEditText(turn.text);
+                            }
+                          }}
                         >
                           {turn.text}
                         </p>
                       )}
                     </div>
-                    <div className="flex gap-1">
+                    <div className="flex shrink-0 gap-1">
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon-sm"
                         onClick={() => generateAudio(turn.turnIndex)}
                         disabled={!!actionLoading}
+                        aria-label={`Regenerate audio for turn ${turn.turnIndex}`}
                         title="Regenerate audio for this turn"
                       >
-                        {actionLoading === `audio-${turn.turnIndex}` ? '...' : '🔄'}
+                        {actionLoading === `audio-${turn.turnIndex}` ? '…' : '🔄'}
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
-                        onClick={() => { setAddingAfter(turn.turnIndex); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
+                        size="icon-sm"
+                        onClick={() => {
+                          setAddingAfter(turn.turnIndex);
+                          setShowAddAtEnd(false);
+                        }}
                         disabled={!!actionLoading}
+                        aria-label={`Insert a new turn after turn ${turn.turnIndex}`}
                         title="Insert a new turn after this one"
                       >
-                        ➕
+                        ＋
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
-                        onClick={() => deleteTurn(turn.turnIndex)}
+                        size="icon-sm"
+                        onClick={() => setDeleteTurnTarget(turn.turnIndex)}
                         disabled={!!actionLoading}
+                        aria-label={`Delete turn ${turn.turnIndex}`}
                         title="Delete this turn"
                       >
                         🗑
@@ -389,131 +635,120 @@ export default function ProjectDetailPage() {
                     </div>
                   </div>
 
-                  {/* Inline add-turn form (insert after this turn) */}
                   {addingAfter === turn.turnIndex && (
-                    <div className="mt-3 p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
-                      <p className="text-xs font-medium">Insert new turn after #{turn.turnIndex + 1}</p>
-                      <select
-                        value={newTurnSpeaker}
-                        onChange={(e) => setNewTurnSpeaker(e.target.value)}
-                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                      >
-                        {project.speakers.map((ps) => (
-                          <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
-                        ))}
-                      </select>
-                      <textarea
-                        value={newTurnText}
-                        onChange={(e) => setNewTurnText(e.target.value)}
-                        placeholder="Enter the turn text..."
-                        className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      />
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => addTurn(turn.turnIndex)} disabled={!!actionLoading}>
-                          {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setAddingAfter(null)}>Cancel</Button>
-                      </div>
-                    </div>
+                    <AddTurnForm
+                      speakers={project.speakers}
+                      insertLabel={`Insert new turn after #${turn.turnIndex + 1}`}
+                      onAdd={(speakerId, text) => addTurn(turn.turnIndex, speakerId, text)}
+                      onCancel={() => setAddingAfter(null)}
+                      busy={actionLoading === 'add turn'}
+                    />
                   )}
                 </div>
               ))}
 
-              {/* Add turn at the end */}
               {showAddAtEnd ? (
-                <div className="p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
-                  <p className="text-xs font-medium">Add new turn at the end</p>
-                  <select
-                    value={newTurnSpeaker}
-                    onChange={(e) => setNewTurnSpeaker(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {project.speakers.map((ps) => (
-                      <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={newTurnText}
-                    onChange={(e) => setNewTurnText(e.target.value)}
-                    placeholder="Enter the turn text..."
-                    className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => addTurn(null)} disabled={!!actionLoading}>
-                      {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setShowAddAtEnd(false)}>Cancel</Button>
-                  </div>
-                </div>
+                <AddTurnForm
+                  speakers={project.speakers}
+                  insertLabel="Add new turn at the end"
+                  onAdd={(speakerId, text) => addTurn(null, speakerId, text)}
+                  onCancel={() => setShowAddAtEnd(false)}
+                  busy={actionLoading === 'add turn'}
+                />
               ) : (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { setShowAddAtEnd(true); setAddingAfter(null); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
+                  onClick={() => {
+                    setShowAddAtEnd(true);
+                    setAddingAfter(null);
+                  }}
                 >
-                  ➕ Add Turn
+                  ＋ Add Turn
                 </Button>
               )}
             </div>
           )}
 
-          {/* When no turns exist, still allow manually adding the first ones */}
           {project.turns.length === 0 && project.speakers.length >= 1 && (
-            showAddAtEnd ? (
-              <div className="mt-4 p-3 rounded-lg border border-primary/40 bg-primary/5 space-y-2">
-                <p className="text-xs font-medium">Add a turn manually</p>
-                <select
-                  value={newTurnSpeaker}
-                  onChange={(e) => setNewTurnSpeaker(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  {project.speakers.map((ps) => (
-                    <option key={ps.speaker.id} value={ps.speaker.id}>{ps.speaker.name}</option>
-                  ))}
-                </select>
-                <textarea
-                  value={newTurnText}
-                  onChange={(e) => setNewTurnText(e.target.value)}
-                  placeholder="Enter the turn text..."
-                  className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+            <div className="mt-4">
+              {showAddAtEnd ? (
+                <AddTurnForm
+                  speakers={project.speakers}
+                  insertLabel="Add a turn manually"
+                  onAdd={(speakerId, text) => addTurn(null, speakerId, text)}
+                  onCancel={() => setShowAddAtEnd(false)}
+                  busy={actionLoading === 'add turn'}
                 />
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => addTurn(null)} disabled={!!actionLoading}>
-                    {actionLoading === 'add turn' ? 'Adding...' : 'Add Turn'}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setShowAddAtEnd(false)}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                className="mt-4"
-                variant="outline"
-                size="sm"
-                onClick={() => { setShowAddAtEnd(true); setNewTurnSpeaker(project.speakers[0]?.speaker.id || ''); setNewTurnText(''); }}
-              >
-                ➕ Add Turn Manually
-              </Button>
-            )
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowAddAtEnd(true);
+                    setAddingAfter(null);
+                  }}
+                >
+                  ＋ Add Turn Manually
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
 
       {/* Exports */}
       {project.exports.length > 0 && (
-        <Card className="mt-6">
-          <CardHeader><CardTitle className="text-lg">Exports</CardTitle></CardHeader>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Exports</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="space-y-2">
               {project.exports.map((exp) => (
-                <div key={exp.id} className="flex items-center justify-between p-2 border rounded">
-                  <span className="text-sm">{new Date(exp.createdAt).toLocaleString()} — {exp.format.toUpperCase()}</span>
-                  {exp.sizeBytes && <span className="text-sm text-muted-foreground">{(exp.sizeBytes / 1024).toFixed(0)} KB</span>}
+                <div key={exp.id} className="flex items-center justify-between rounded-md border border-border p-2">
+                  <span className="text-sm">
+                    {new Date(exp.createdAt).toLocaleString()} — {exp.format.toUpperCase()}
+                  </span>
+                  {exp.sizeBytes && (
+                    <span className="text-sm text-muted-foreground">{(exp.sizeBytes / 1024).toFixed(0)} KB</span>
+                  )}
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Confirm delete turn — replaces window.confirm */}
+      <Dialog
+        open={deleteTurnTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTurnTarget(null);
+        }}
+        title="Delete turn?"
+        description={
+          deleteTurnTarget !== null
+            ? `Turn #${deleteTurnTarget + 1} will be permanently removed. This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => deleteTurnTarget !== null && deleteTurn(deleteTurnTarget)}
+      />
+
+      {/* Validation result — replaces window.alert */}
+      <Dialog
+        open={validationDialog.open}
+        onOpenChange={(open) => setValidationDialog((v) => ({ ...v, open }))}
+        title="Validation complete"
+        description={validationDialog.message}
+        confirmLabel="OK"
+        cancelLabel=""
+        hideFooter={false}
+        onConfirm={() => setValidationDialog({ open: false, message: '' })}
+      />
     </div>
   );
 }
