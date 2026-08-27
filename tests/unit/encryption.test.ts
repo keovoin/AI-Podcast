@@ -57,7 +57,11 @@ describe('Encryption', () => {
 
     it('should fail with tampered ciphertext', () => {
       const encrypted = encryptApiKey('test-key');
-      encrypted.encryptedKey = encrypted.encryptedKey + 'tampered';
+      // Flip one base64 character *inside* the ciphertext (appending is
+      // ignored by the base64 decoder, so it would not trigger GCM auth).
+      encrypted.encryptedKey =
+        (encrypted.encryptedKey[0] === 'A' ? 'B' : 'A') +
+        encrypted.encryptedKey.slice(1);
 
       expect(() => decryptApiKey(encrypted)).toThrow();
     });
@@ -73,6 +77,7 @@ describe('Encryption', () => {
   describe('maskApiKey', () => {
     it('should mask a long key showing first 4 and last 4 characters', () => {
       const result = maskApiKey('sk-1234567890abcdef');
+      // 18 chars -> 4 shown + 10 masked + 4 shown
       expect(result).toBe('sk-1**********cdef');
       expect(result).not.toContain('567890');
     });
@@ -99,6 +104,7 @@ describe('Encryption', () => {
       const encrypted = encryptApiKey(plaintext);
       const masked = getMaskedKey(encrypted);
 
+      // 18 chars -> 4 shown + 10 masked + 4 shown
       expect(masked).toBe('sk-1**********cdef');
       expect(masked).not.toContain('567890');
     });

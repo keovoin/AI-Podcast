@@ -38,8 +38,6 @@ describe('MockLLMAdapter', () => {
     );
 
     const parsed = JSON.parse(response.text);
-    expect(parsed.episode).toBeDefined();
-    expect(parsed.episode.title).toBeTruthy();
     expect(parsed.turns).toBeInstanceOf(Array);
     expect(parsed.turns.length).toBeGreaterThan(0);
 

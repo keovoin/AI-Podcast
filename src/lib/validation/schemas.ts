@@ -23,7 +23,14 @@ export const providerCreateSchema = z.object({
   name: z.string().min(1).max(100),
   category: providerCategorySchema,
   adapterType: adapterTypeSchema,
-  baseUrl: z.string().max(2000).optional(),
+  baseUrl: z
+    .string()
+    .max(2000)
+    .refine(
+      (v) => v === '' || /^https?:\/\/.+/i.test(v),
+      'baseUrl must be a valid http(s) URL'
+    )
+    .optional(),
   endpointPath: z.string().max(500).optional(),
   apiKey: z.string().min(1).max(1000).optional(),
   model: z.string().max(200).optional(),
