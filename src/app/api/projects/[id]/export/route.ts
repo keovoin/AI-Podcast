@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { generateTranscript } from '@/lib/export/transcript';
 import { generateShowNotes } from '@/lib/export/show-notes';
@@ -148,7 +149,7 @@ export async function POST(
       const clip = clips[i]!;
       const cacheKey = generateClipCacheKey(
         providerId,
-        speakerVoiceMap[clip.speakerId],
+        speakerVoiceMap[clip.speakerId] ?? ttsResolved?.voiceIds?.[0] ?? 'mock-km-male-1',
         project.turns[i]!.text,
         (project.turns[i]!.delivery as any)?.pace,
         (project.turns[i]!.delivery as any)?.emotion
@@ -160,7 +161,7 @@ export async function POST(
           projectId: id,
           turnId: project.turns[i]!.id,
           providerId,
-          voiceId: speakerVoiceMap[clip.speakerId],
+          voiceId: speakerVoiceMap[clip.speakerId] ?? ttsResolved?.voiceIds?.[0] ?? 'mock-km-male-1',
           textHash: cacheKey,
           s3Key: `projects/${id}/clips/${i}.wav`,
           durationMs: clip.durationMs,
@@ -210,12 +211,12 @@ export async function POST(
       where: { projectId: id },
       create: {
         projectId: id,
-        content: transcript.entries,
+        content: transcript.entries as unknown as Prisma.InputJsonValue,
         srt: transcript.srt,
         vtt: transcript.vtt,
       },
       update: {
-        content: transcript.entries,
+        content: transcript.entries as unknown as Prisma.InputJsonValue,
         srt: transcript.srt,
         vtt: transcript.vtt,
       },
@@ -226,15 +227,15 @@ export async function POST(
       create: {
         projectId: id,
         summary: showNotes.summary,
-        chapters: showNotes.chapters,
-        takeaways: showNotes.takeaways,
-        factList: showNotes.factList,
+        chapters: showNotes.chapters as unknown as Prisma.InputJsonValue,
+        takeaways: showNotes.takeaways as unknown as Prisma.InputJsonValue,
+        factList: showNotes.factList as unknown as Prisma.InputJsonValue,
       },
       update: {
         summary: showNotes.summary,
-        chapters: showNotes.chapters,
-        takeaways: showNotes.takeaways,
-        factList: showNotes.factList,
+        chapters: showNotes.chapters as unknown as Prisma.InputJsonValue,
+        takeaways: showNotes.takeaways as unknown as Prisma.InputJsonValue,
+        factList: showNotes.factList as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -291,7 +292,7 @@ export async function POST(
         format: 'zip',
         s3Key: `exports/${id}/${exportResult.fileName}`,
         sizeBytes: exportResult.zipBuffer.length,
-        manifest: manifest,
+        manifest: manifest as unknown as Prisma.InputJsonValue,
         includesAi: true,
       },
     });
@@ -305,7 +306,7 @@ export async function POST(
     console.log(`[Export] Complete! ZIP: ${exportResult.zipBuffer.length} bytes`);
 
     // Return ZIP as download
-    return new NextResponse(exportResult.zipBuffer, {
+    return new NextResponse(new Uint8Array(exportResult.zipBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',

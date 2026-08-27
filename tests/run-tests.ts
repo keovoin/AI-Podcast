@@ -354,7 +354,7 @@ describe('MockLLMAdapter', () => {
   test('discovers models', async () => {
     const models = await adapter.discoverModels(mockConfig);
     assert.ok(models.length > 0);
-    assert.ok(models[0].id);
+    assert.ok(models[0]!.id);
   });
 
   test('simulates failure when configured', async () => {

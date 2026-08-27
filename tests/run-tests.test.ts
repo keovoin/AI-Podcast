@@ -2,7 +2,7 @@
  * Test suite using Bun's built-in test runner.
  * Run with: bun test tests/run-tests.test.ts
  */
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'vitest';
 
 // Set up test environment
 beforeAll(() => {
@@ -64,8 +64,8 @@ describe('Encryption - decryptApiKey', () => {
 describe('Encryption - maskApiKey', () => {
   test('masks long key showing first 4 and last 4', () => {
     const result = maskApiKey('sk-1234567890abcdef');
-    expect(result).toStartWith('sk-1');
-    expect(result).toEndWith('cdef');
+    expect(result).toMatch(/^sk-1/);
+    expect(result).toMatch(/cdef$/);
     expect(result).toContain('*');
     expect(result).not.toContain('567890');
   });
@@ -385,7 +385,7 @@ describe('MockLLMAdapter', () => {
     );
     const parsed = JSON.parse(response.text);
     expect(parsed.episode).toBeDefined();
-    expect(parsed.turns).toBeArray();
+    expect(Array.isArray(parsed.turns)).toBe(true);
     expect(parsed.turns.length).toBeGreaterThan(0);
     expect(parsed.turns[0].id).toMatch(/^turn_\d{4}$/);
     expect(parsed.turns[0].delivery.emotion).toBeTruthy();

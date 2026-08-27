@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { providerCreateSchema } from '@/lib/validation/schemas';
 import { encryptApiKey, maskApiKey } from '@/lib/crypto';
@@ -144,18 +145,18 @@ export async function POST(request: NextRequest) {
         model: data.model,
         authType: data.authType,
         authHeaderName: data.authHeaderName,
-        customHeaders: data.customHeaders ?? undefined,
+        customHeaders: data.customHeaders as Prisma.InputJsonValue | undefined,
         timeoutMs: data.timeoutMs,
         enabled: data.enabled,
         priority: data.priority,
-        costMetadata: data.costMetadata ?? undefined,
+        costMetadata: data.costMetadata as Prisma.InputJsonValue | undefined,
         monthlyBudget: data.monthlyBudget,
         dataResidency: data.dataResidency,
         allowSensitive: data.allowSensitive,
-        requestTemplate: data.requestTemplate ?? undefined,
+        requestTemplate: data.requestTemplate as Prisma.InputJsonValue | undefined,
         responseJsonPath: data.responseJsonPath,
         audioResponseType: data.audioResponseType,
-        voiceIds: data.voiceIds ?? undefined,
+        voiceIds: data.voiceIds as Prisma.InputJsonValue | undefined,
       },
     });
 

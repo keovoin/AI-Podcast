@@ -61,7 +61,7 @@ export async function uploadFile(
         'Date': date,
         'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
       },
-      body: data,
+      body: new Uint8Array(data),
     });
 
     if (!response.ok) {

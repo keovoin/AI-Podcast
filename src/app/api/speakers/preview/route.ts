@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       pace: pace || 'normal',
     }, config);
 
-    return new NextResponse(result.audio, {
+    return new NextResponse(new Uint8Array(result.audio), {
       status: 200,
       headers: {
         'Content-Type': 'audio/wav',

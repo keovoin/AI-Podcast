@@ -3,7 +3,7 @@
  * Tests core library modules that only use Node.js built-in modules.
  * Run with: bun test tests/standalone.test.ts
  */
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'vitest';
 
 // Set up test environment
 beforeAll(() => {
@@ -472,8 +472,8 @@ describe('MockLLMAdapter', () => {
   test('discovers models', async () => {
     const models = await adapter.discoverModels(mockConfig);
     expect(models.length).toBeGreaterThan(0);
-    expect(models[0].id).toBeTruthy();
-    expect(models[0].name).toBeTruthy();
+    expect(models[0]!.id).toBeTruthy();
+    expect(models[0]!.name).toBeTruthy();
   });
 
   test('simulates failure', async () => {

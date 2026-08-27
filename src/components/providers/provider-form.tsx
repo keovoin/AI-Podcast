@@ -367,7 +367,7 @@ export function ProviderForm({ providerId, onSuccess, onCancel }: ProviderFormPr
       {formData.adapterType === 'CUSTOM_REST' && (
         <>
           <div className="space-y-2">
-            <Label htmlFor="requestTemplate">Request Template (JSON with {{variables}})</Label>
+            <Label htmlFor="requestTemplate">{'Request Template (JSON with {{variables}})'}</Label>
             <textarea
               id="requestTemplate"
               value={formData.requestTemplate}

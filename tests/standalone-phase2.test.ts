@@ -2,7 +2,7 @@
  * Phase 2 tests: Dialogue validation, audio composition, transcript, show notes, ZIP export.
  * Run with: bun test tests/standalone-phase2.test.ts
  */
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'vitest';
 
 beforeAll(() => {
   process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
@@ -296,7 +296,7 @@ describe('Transcript Generation', () => {
 
   test('generates valid VTT format', () => {
     const result = generateTranscript(turns, timestamps, names);
-    expect(result.vtt).toStartWith('WEBVTT');
+    expect(result.vtt).toMatch(/^WEBVTT/);
     expect(result.vtt).toContain('00:00:00.000 --> 00:00:03.000');
     expect(result.vtt).toContain('<v Piseth>');
   });
@@ -438,7 +438,7 @@ describe('ZIP Builder', () => {
     // ZIP should be larger with audio included
     expect(result.zipBuffer.length).toBeGreaterThan(100);
     expect(result.fileName).toContain('Test_Episode');
-    expect(result.fileName).toEndWith('.zip');
+    expect(result.fileName).toMatch(/.zip$/);
   });
 
   test('generates safe filename', () => {
