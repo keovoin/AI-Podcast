@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ProviderForm } from '@/components/providers/provider-form';
 import { RoutingExplanation } from '@/components/routing/routing-explanation';
 import { Dialog } from '@/components/ui/dialog';
@@ -117,18 +118,42 @@ export default function ProvidersPage() {
 
   if (loading) {
     return (
-      <div className="container py-10">
-        <p className="text-muted-foreground">Loading providers...</p>
+      <div className="space-y-6" aria-busy="true">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="mt-2 h-4 w-64" />
+          </div>
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-2">
+                    <Skeleton className="h-5 w-40" />
+                    <Skeleton className="h-4 w-56" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-9 w-16" />
+                    <Skeleton className="h-9 w-16" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container py-10">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Provider Settings</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl font-bold tracking-tight">Provider Settings</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Configure LLM and TTS providers for podcast generation
           </p>
         </div>
@@ -138,15 +163,18 @@ export default function ProvidersPage() {
       </div>
 
       {fetchError && (
-        <div className="p-4 rounded bg-destructive/10 text-destructive text-sm mb-6">
-          <p className="font-medium">Database Error</p>
-          <p>{fetchError}</p>
-          <p className="mt-2 text-xs">Make sure you ran the SQL init script in your Neon dashboard. See the README for setup instructions.</p>
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <span aria-hidden="true">⚠️</span>
+          <div>
+            <p className="font-medium">Database Error</p>
+            <p>{fetchError}</p>
+            <p className="mt-2 text-xs">Make sure you ran the SQL init script in your Neon dashboard. See the README for setup instructions.</p>
+          </div>
         </div>
       )}
 
       {showForm && (
-        <Card className="mb-8">
+        <Card className="mb-6">
           <CardHeader>
             <CardTitle>{editingId ? 'Edit Provider' : 'New Provider'}</CardTitle>
             <CardDescription>
@@ -176,7 +204,7 @@ export default function ProvidersPage() {
       )}
 
       {/* Provider List */}
-      <div className="grid gap-4 mt-8">
+      <div className="grid gap-4">
         {providers.length === 0 && !fetchError ? (
           <Card>
             <CardContent className="py-10 text-center">
@@ -190,11 +218,11 @@ export default function ProvidersPage() {
           </Card>
         ) : (
           providers.map((provider) => (
-            <Card key={provider.id}>
+            <Card key={provider.id} className="card-lift">
               <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold">{provider.name}</h3>
                         <Badge variant="secondary">{provider.category}</Badge>
@@ -217,7 +245,7 @@ export default function ProvidersPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
                     <Button
                       variant="outline"
                       size="sm"

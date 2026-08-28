@@ -130,7 +130,7 @@ export default function ProjectsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Your podcast episodes</p>
         </div>
         <Button asChild>
-          <Link href="/projects/new">＋ New Podcast</Link>
+          <Link href="/projects/new">+ New Podcast</Link>
         </Button>
       </div>
 
@@ -147,8 +147,8 @@ export default function ProjectsPage() {
           {projects.map((p) => {
             const meta = statusMeta(p.status);
             return (
-              <Link key={p.id} href={`/projects/${p.id}`} className="group focus-visible:outline-none">
-                <Card className="card-lift h-full overflow-hidden">
+              <Link key={p.id} href={`/projects/${p.id}`} className="group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-lg">
+                <Card className="card-lift h-full overflow-hidden transition-colors group-hover:border-primary/30">
                   <ProjectThumbnail project={p} />
                   <CardContent className="space-y-3 py-4">
                     <div>

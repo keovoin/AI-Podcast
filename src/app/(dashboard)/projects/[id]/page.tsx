@@ -443,12 +443,12 @@ export default function ProjectDetailPage() {
 
       {/* Episode audio player */}
       {project.status === 'AUDIO_READY' || project.status === 'EXPORTED' ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">\ud83c\udfa7 Episode Audio</CardTitle>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-border/60 bg-primary/5">
+            <CardTitle className="text-lg">🎧 Episode Audio</CardTitle>
             <CardDescription>Stream the generated episode (WAV, 16 kHz mono) — supports seeking via HTTP Range.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             <audio
               controls
               preload="metadata"
@@ -475,10 +475,17 @@ export default function ProjectDetailPage() {
           ) : (
             <div className="flex flex-wrap gap-3">
               {project.speakers.map((ps) => (
-                <div key={ps.speaker.id} className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="font-medium">{ps.speaker.name}</p>
-                  <p className="text-sm text-muted-foreground">{ps.speaker.role || 'Speaker'}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
+                <div key={ps.speaker.id} className="min-w-[180px] flex-1 rounded-lg border border-border bg-muted/30 p-3 sm:flex-none">
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm">
+                      🎙️
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{ps.speaker.name}</p>
+                      <p className="text-sm text-muted-foreground">{ps.speaker.role || 'Speaker'}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">Voice: {ps.speaker.voiceId || 'default'}</p>
                 </div>
               ))}
             </div>
@@ -529,8 +536,12 @@ export default function ProjectDetailPage() {
         </CardHeader>
         <CardContent>
           {project.turns.length === 0 ? (
-            <div className="py-4 text-center text-sm text-muted-foreground">
-              No dialogue yet. Click &quot;1. Generate Outline&quot; then &quot;2. Generate Dialogue&quot; above.
+            <div className="flex flex-col items-center rounded-lg border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
+              <span aria-hidden="true" className="mb-2 text-3xl">💬</span>
+              <p className="text-sm font-medium text-foreground">No dialogue yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Click &quot;1. Generate Outline&quot; then &quot;2. Generate Dialogue&quot; above.
+              </p>
             </div>
           ) : (
             <div className="space-y-2">

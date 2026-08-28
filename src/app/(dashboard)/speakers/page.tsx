@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog } from '@/components/ui/dialog';
 
 interface Speaker {
@@ -96,16 +97,41 @@ export default function SpeakersPage() {
     }
   }
 
-  if (loading) return <div className="container py-10"><p className="text-muted-foreground">Loading...</p></div>;
+  if (loading) {
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="mt-2 h-4 w-64" />
+          </div>
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="py-4 flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-5 w-40" />
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <Skeleton className="h-9 w-28" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container py-10">
+    <div className="space-y-6">
       <audio ref={audioRef} className="hidden" />
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Speaker Library</h1>
-          <p className="text-muted-foreground mt-1">Reusable speaker profiles with voice preview</p>
+          <h1 className="text-2xl font-bold tracking-tight">Speaker Library</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Reusable speaker profiles with voice preview</p>
         </div>
         <Button onClick={() => { setShowForm(true); setEditId(null); }}>Add Speaker</Button>
       </div>
@@ -114,7 +140,7 @@ export default function SpeakersPage() {
         <Card className="mb-6">
           <CardHeader><CardTitle>{editId ? 'Edit' : 'New'} Speaker</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Speaker name" /></div>
               <div className="space-y-1"><Label>Role</Label><Input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Host / Guest / Expert" /></div>
               <div className="space-y-1"><Label>Personality</Label><Input value={form.personality} onChange={(e) => setForm({ ...form, personality: e.target.value })} placeholder="Curious, friendly, analytical..." /></div>
@@ -139,7 +165,7 @@ export default function SpeakersPage() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div><Label>Formality: {form.formality}</Label><input type="range" min="0" max="100" value={form.formality} onChange={(e) => setForm({ ...form, formality: +e.target.value })} className="w-full" /></div>
               <div><Label>Energy: {form.energy}</Label><input type="range" min="0" max="100" value={form.energy} onChange={(e) => setForm({ ...form, energy: +e.target.value })} className="w-full" /></div>
               <div><Label>Humor: {form.humor}</Label><input type="range" min="0" max="100" value={form.humor} onChange={(e) => setForm({ ...form, humor: +e.target.value })} className="w-full" /></div>
@@ -157,17 +183,18 @@ export default function SpeakersPage() {
         {speakers.length === 0 ? (
           <Card><CardContent className="py-8 text-center text-muted-foreground">No speakers yet. Click "Add Speaker" to create one.</CardContent></Card>
         ) : speakers.map((s) => (
-          <Card key={s.id}>
-            <CardContent className="py-4 flex items-center justify-between">
-              <div>
+          <Card key={s.id} className="card-lift">
+            <CardContent className="py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="font-medium">{s.name}</p>
+                  <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm">🎙️</span>
+                  <p className="truncate font-medium">{s.name}</p>
                   <Badge variant="outline">{s.role || 'Speaker'}</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">{s.personality || 'No personality set'}</p>
                 <p className="text-xs text-muted-foreground">Voice: {s.voiceId || 'default'} | F:{s.formality} E:{s.energy} H:{s.humor} A:{s.assertiveness}</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex shrink-0 gap-2">
                 <Button
                   variant="outline"
                   size="sm"

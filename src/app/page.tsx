@@ -49,8 +49,9 @@ const PIPELINE = [
 export default function HomePage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
-      {/* Ambient gradient blobs */}
+      {/* Ambient gradient blobs + dot grid texture */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+        <div className="page-grid absolute inset-0" />
         <div className="absolute -top-32 left-1/4 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute top-1/3 -right-24 h-80 w-80 rounded-full bg-accent/40 blur-3xl" />
         <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-primary/5 blur-3xl" />
@@ -94,8 +95,9 @@ export default function HomePage() {
       {/* Hero */}
       <main className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
         <section className="flex flex-col items-center py-20 text-center sm:py-28">
-          <Badge variant="secondary" className="mb-6 px-3 py-1 text-sm">
-            🇰🇭 Khmer-first · multi-provider · open source
+          <Badge variant="secondary" className="mb-6 gap-2 rounded-full px-3.5 py-1.5 text-sm">
+            <span aria-hidden="true" className="text-base leading-none">🇰🇭</span>
+            <span>Khmer-first · multi-provider · open source</span>
           </Badge>
           <h1 className="max-w-3xl text-balance text-4xl font-bold tracking-tight sm:text-6xl">
             AI Podcast Studio
@@ -111,13 +113,13 @@ export default function HomePage() {
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/projects/new"
-              className="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-base font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]"
+              className="inline-flex h-11 items-center justify-center rounded-lg bg-primary px-8 text-base font-semibold text-primary-foreground shadow-[0_1px_2px_rgb(0_0_0/0.2),0_8px_24px_-8px_hsl(var(--primary)/0.6)] transition-all hover:bg-primary/90 hover:shadow-[0_1px_2px_rgb(0_0_0/0.2),0_12px_32px_-8px_hsl(var(--primary)/0.8)] active:scale-[0.98]"
             >
               ✨ Create a Podcast
             </Link>
             <Link
               href="/providers"
-              className="inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-8 text-base font-semibold shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
+              className="inline-flex h-11 items-center justify-center rounded-lg border border-input bg-background px-8 text-base font-semibold shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
             >
               Configure Providers
             </Link>
@@ -164,10 +166,10 @@ export default function HomePage() {
             {FEATURES.map((f) => (
               <div
                 key={f.title}
-                className="card-lift rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)]"
+                className="card-lift group rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)] transition-colors hover:border-primary/30"
               >
                 <div
-                  className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-xl"
+                  className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-xl transition-colors group-hover:bg-primary/15"
                   aria-hidden="true"
                 >
                   {f.icon}

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog } from '@/components/ui/dialog';
 
 interface Provider {
@@ -121,11 +122,13 @@ export default function BenchmarkPage() {
   }
 
   return (
-    <div className="container py-10">
-      <h1 className="text-3xl font-bold mb-2">Khmer Benchmark Lab</h1>
-      <p className="text-muted-foreground mb-8">
-        Rate provider quality using standardized Khmer test cases. Score 1-5 per dimension.
-      </p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Khmer Benchmark Lab</h1>
+        <p className="mt-1 text-sm text-muted-foreground mb-6">
+          Rate provider quality using standardized Khmer test cases. Score 1-5 per dimension.
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Rate */}
@@ -135,18 +138,18 @@ export default function BenchmarkPage() {
               <CardTitle>Select Provider & Test Case</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label>Provider</Label>
                   {loadingProviders ? (
-                    <p className="text-sm text-muted-foreground">Loading...</p>
+                    <Skeleton className="h-10 w-full" />
                   ) : providers.length === 0 ? (
                     <p className="text-sm text-destructive">No providers configured. Add one in Provider Settings first.</p>
                   ) : (
                     <select
                       value={selectedProvider}
                       onChange={(e) => setSelectedProvider(e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {providers.map((p) => (
                         <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
@@ -159,7 +162,7 @@ export default function BenchmarkPage() {
                   <select
                     value={selectedCase}
                     onChange={(e) => setSelectedCase(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {TEST_CASES.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
@@ -177,14 +180,15 @@ export default function BenchmarkPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {DIMENSIONS.map((d) => (
-                <div key={d.key} className="flex items-center gap-4">
-                  <span className="w-44 text-sm">{d.label} ({Math.round(d.weight * 100)}%)</span>
+                <div key={d.key} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                  <span className="w-44 shrink-0 text-sm">{d.label} ({Math.round(d.weight * 100)}%)</span>
                   <div className="flex gap-1">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <Button
                         key={n} size="sm"
                         variant={(scores[d.key] || 0) >= n ? 'default' : 'outline'}
                         onClick={() => setScores({ ...scores, [d.key]: n })}
+                        aria-pressed={(scores[d.key] || 0) >= n}
                       >
                         {n}
                       </Button>
@@ -195,7 +199,7 @@ export default function BenchmarkPage() {
               ))}
               <div className="space-y-1">
                 <Label>Notes</Label>
-                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="Additional observations..." />
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Additional observations..." />
               </div>
               <Button onClick={saveRating} disabled={saving || !selectedProvider || Object.keys(scores).length === 0}>
                 {saving ? 'Saving...' : 'Save Rating'}

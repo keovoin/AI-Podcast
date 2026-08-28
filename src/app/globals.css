@@ -35,29 +35,29 @@
   .dark {
     --background: 224 71% 4%;
     --foreground: 213 31% 91%;
-    --card: 224 47% 8%;
+    --card: 224 47% 9%;
     --card-foreground: 213 31% 91%;
-    --popover: 224 47% 8%;
+    --popover: 224 47% 10%;
     --popover-foreground: 213 31% 91%;
-    --primary: 210 92% 60%;
+    --primary: 210 92% 62%;
     --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 14%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
+    --muted: 217.2 32.6% 15%;
+    --muted-foreground: 215 20.2% 68%;
+    --accent: 217.2 32.6% 18%;
     --accent-foreground: 210 40% 98%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 72% 54%;
     --destructive-foreground: 210 40% 98%;
-    --success: 142.1 70.6% 45.3%;
+    --success: 142.1 70.6% 48%;
     --success-foreground: 144.9 80.4% 10%;
-    --warning: 38 92% 50%;
+    --warning: 38 92% 52%;
     --warning-foreground: 48 96% 89%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 20%;
-    --ring: 210 92% 60%;
-    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 1px 3px 0 rgb(0 0 0 / 0.3);
-    --shadow-popover: 0 10px 38px -10px rgb(0 0 0 / 0.7), 0 10px 20px -15px rgb(0 0 0 / 0.5);
+    --border: 217.2 32.6% 18.5%;
+    --input: 217.2 32.6% 22%;
+    --ring: 210 92% 62%;
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.45), 0 1px 3px 0 rgb(0 0 0 / 0.35), 0 0 0 1px rgb(255 255 255 / 0.02);
+    --shadow-popover: 0 10px 38px -10px rgb(0 0 0 / 0.75), 0 10px 20px -15px rgb(0 0 0 / 0.55);
   }
 }
 
@@ -71,6 +71,14 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "kern", "liga", "calt";
+  }
+  /* Fragments-style subtle page texture: faint dot grid + radial glow */
+  .page-grid {
+    background-image:
+      radial-gradient(circle at 1px 1px, hsl(var(--border) / 0.35) 1px, transparent 0);
+    background-size: 28px 28px;
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 92%);
+    mask-image: linear-gradient(to bottom, black 0%, transparent 92%);
   }
   /* Khmer script rendering: slightly taller line-height for stacked diacritics */
   .font-khmer {
